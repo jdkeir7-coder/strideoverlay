@@ -569,6 +569,56 @@ body[data-editor-step="3"] .stage .syncHelp {color:#004225!important;}
   filter: none !important;
 }
 </style>
+
+<style id="stride-share-save-buttons-v37">
+/* Flat, consistent save/share buttons. No diagonal hover gradient. */
+#saveActions #shareBtn,
+#saveActions #downloadBtn {
+  background: #f7f9f7 !important;
+  background-color: #f7f9f7 !important;
+  background-image: none !important;
+  color: #004225 !important;
+  border: 2px solid #004225 !important;
+  border-radius: 12px;
+  box-shadow: none !important;
+  filter: none !important;
+  transition: background-color 120ms ease;
+}
+#saveActions #shareBtn:hover:not(:disabled),
+#saveActions #shareBtn:active:not(:disabled),
+#saveActions #shareBtn:focus-visible,
+#saveActions #downloadBtn:hover:not(:disabled),
+#saveActions #downloadBtn:active:not(:disabled),
+#saveActions #downloadBtn:focus-visible {
+  background: #92ff5f !important;
+  background-color: #92ff5f !important;
+  background-image: none !important;
+  color: #004225 !important;
+  border-color: #004225 !important;
+  box-shadow: none !important;
+  filter: none !important;
+}
+#saveActions #shareBtn:focus-visible,
+#saveActions #downloadBtn:focus-visible {
+  outline: 3px solid #004225;
+  outline-offset: 3px;
+}
+</style>
+
+<style id="stride-save-clarity-v38">
+/* Consistent, clearly differentiated destination buttons. */
+#saveActions{gap:10px!important;margin-top:14px;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+#saveActions button{margin:0!important;min-width:0;min-height:52px;padding:11px 12px!important;line-height:1.25;text-align:center;white-space:normal;font-size:14px;font-weight:800}
+#saveActions.saveIos #shareBtn,#saveActions.saveOther #downloadBtn{background:#004225!important;background-image:none!important;color:#fff!important;border-color:#004225!important}
+#saveActions.saveIos #downloadBtn,#saveActions.saveOther #shareBtn{background:#f7f9f7!important;background-image:none!important;color:#004225!important;border-color:#004225!important}
+#saveActions button:hover:not(:disabled),#saveActions button:active:not(:disabled),#saveActions button:focus-visible{background:#92ff5f!important;background-image:none!important;color:#004225!important;border-color:#004225!important}
+#saveActions button[hidden]{display:none!important}
+#saveActions:has(button[hidden]){grid-template-columns:1fr!important}
+.saveHelp{font-size:12px;line-height:1.55;color:#284d3a;background:#e9f6e5;border-left:3px solid #004225;padding:10px 12px;border-radius:7px;margin:12px 0 7px}
+.saveHelp[hidden],.audioExportStatus[hidden]{display:none!important}
+.audioExportStatus{font-size:12px;line-height:1.4;color:#004225;margin:8px 0 10px;font-weight:650}
+@media(max-width:600px){#saveActions{grid-template-columns:1fr!important}#saveActions button{width:100%;min-height:50px}}
+</style>
 </head>
   <body>
     <header>
@@ -935,16 +985,18 @@ body[data-editor-step="3"] .stage .syncHelp {color:#004225!important;}
             <div class="message" id="message" role="status" aria-live="polite">
               Add a video and GPX file to begin.
             </div>
-            <div id="saveActions" class="two" style="display:none">
+            <div id="saveActions" class="two" style="display:none" aria-label="Save or share your exported video">
               <button id="shareBtn" class="primary" type="button" style="margin-top:0">
-                Share / AirDrop
+                Share video
               </button>
-              <button id="downloadBtn" class="primary" type="button" style="margin-top:0;background:#28332b;color:#e9f3df;border:1px solid #668052">
-                Save video
+              <button id="downloadBtn" class="primary" type="button" style="margin-top:0">
+                Download MP4
               </button>
             </div>
+            <p id="saveHelp" class="saveHelp" hidden aria-live="polite"></p>
+            <p id="audioExportStatus" class="audioExportStatus" hidden aria-live="polite"></p>
             <p class="foot">
-              Your files stay in your browser. On iPhone, export in Safari, tap Share / AirDrop, then choose Save Video for Photos or an AirDrop recipient. MP4 availability depends on your browser. High quality uses more processing power and storage; a lower-resolution source will be enlarged, not made sharper.
+              Videos are processed in your browser. On iPhone, use the share sheet and choose <strong>Save Video</strong> to add the export to Photos; downloading an MP4 typically saves it to Files or Downloads. High quality requires more processing power and storage.
             </p>
           </div>
           <aside class="adPlacement pageAd" id="pageAd" data-ad-slot="" aria-label="Advertisement" hidden="">
@@ -1298,9 +1350,9 @@ async function encodeMontageAudio(plan,muxer,signal){
  let support;
  try{support=await AudioEncoder.isConfigSupported(config)}catch{}
  if(!support?.supported)throw Error('AAC audio encoding is not supported in this browser. The exporter will not silently discard your video audio. Try Chrome or Edge on a computer.');
- let audioError=null;
+ let audioError=null, audioChunks=0;
  const encoder=new AudioEncoder({
-  output:(chunk,metadata)=>{try{muxer.addAudioChunk(chunk,metadata)}catch(err){audioError=err}},
+  output:(chunk,metadata)=>{try{muxer.addAudioChunk(chunk,metadata);audioChunks++}catch(err){audioError=err}},
   error:err=>{audioError=err}
  });
  try{
@@ -1338,6 +1390,8 @@ async function encodeMontageAudio(plan,muxer,signal){
   }
   await encoder.flush();
   if(audioError)throw audioError;
+  if(!audioChunks)throw Error('The MP4 audio encoder produced no sound track. Export stopped so you do not save a silent video.');
+  return audioChunks;
  }finally{try{if(encoder.state!=='closed')encoder.close()}catch{}}
 }
 async function run(options){
@@ -1377,10 +1431,14 @@ async function run(options){
   // Write the source audio in montage order, using the same precise trim boundaries.
   // Every section has its own samples, so split/reordered clips cannot borrow
   // sound from their neighbour. Silent sections are padded with silence.
-  await encodeMontageAudio(audioPlan,muxer,signal);
+  const audioChunks=await encodeMontageAudio(audioPlan,muxer,signal);
   if(signal.aborted)throw new DOMException('Export stopped','AbortError');
-  muxer.finalize();progress(1,total,total);
-  return{blob:new Blob([target.buffer],{type:'video/mp4'}),type:'video/mp4',extension:'mp4',dispose:done.dispose};
+  muxer.finalize();
+  if(audioPlan.hasAudio&&(!(audioChunks>0)||mp4AudioTrackPresent(target.buffer)!==true)){
+   throw Error('The finished MP4 is missing its audio track. Export stopped to prevent a silent download.');
+  }
+  progress(1,total,total);
+  return{blob:new Blob([target.buffer],{type:'video/mp4'}),type:'video/mp4',extension:'mp4',audioIncluded:audioPlan.hasAudio,audioChunks:audioChunks||0,dispose:done.dispose};
  }finally{
   try{if(encoder.state!=='closed')encoder.close()}catch{}
   for(const v of videos.values()){v.removeAttribute('src');v.load();v.remove()}
@@ -1794,7 +1852,7 @@ async function exportClip(){
  recording=true;montagePlaying=false;video.pause();cancelAnimationFrame(raf);transitionDemoStop=null;transitionFrame=null;setPlayState(false);
  for(const element of controls)element.disabled=true;
  for(const id of ['videoInput','extraVideoInput','gpxInput','exportBtn','aspect','transitionMode','removeVideo','removeGpx','addClip'])$(id).disabled=true;
- syncDropdowns();$('exportBtn').classList.add('exporting');$('saveActions').style.display='none';$('progress').style.display='block';$('exportProgress').hidden=false;$('stopExport').hidden=false;showAd('exportSpot',adSlots.export);$('bar').style.width='0%';$('exportPercent').textContent='0% rendered';$('exportRemaining').textContent='Calculating time left…';updateTrim();
+ syncDropdowns();$('exportBtn').classList.add('exporting');$('saveActions').style.display='none';$('saveHelp').hidden=true;$('audioExportStatus').hidden=true;$('progress').style.display='block';$('exportProgress').hidden=false;$('stopExport').hidden=false;showAd('exportSpot',adSlots.export);$('bar').style.width='0%';$('exportPercent').textContent='0% rendered';$('exportRemaining').textContent='Calculating time left…';updateTrim();
  canvas.width=W*(fourK?2:1);canvas.height=H*(fourK?2:1);ctx.setTransform(fourK?2:1,0,0,fourK?2:1,0,0);
  const started=performance.now();let lastProgress=0;
  cancelExport=()=>{controller.abort();$('stopExport').disabled=true;say('Stopping export…')};
@@ -1808,9 +1866,11 @@ async function exportClip(){
   if(controller.signal.aborted){await result.dispose();throw new DOMException('Export stopped','AbortError')}
   const filename='stride-overlay-montage-'+$('aspect').value.replace(':','x')+'-'+Date.now()+'.'+result.extension;
   const previousCleanup=exportFileCleanup;exportedFile=new File([result.blob],filename,{type:result.type});exportFileCleanup=result.dispose;await previousCleanup?.();
-  $('saveActions').style.display='grid';$('saveActions').style.gridTemplateColumns=navigator.share?'1fr 1fr':'1fr';$('shareBtn').hidden=!navigator.share;
-  say('Your '+fmtCut(total)+' montage is ready at '+fps+' fps as '+result.extension.toUpperCase()+' with original clip audio where present. '+(navigator.share?'Use Share / AirDrop or Save video.':'Use Save video to download.'));
- }catch(error){if(hadSavedVideo)$('saveActions').style.display='grid';say(controller.signal.aborted?'Export stopped. You can edit and export again.':error.message||'Export failed. Try standard quality or an updated browser.',!controller.signal.aborted)}
+  showExportSaveChoices();
+  $('audioExportStatus').hidden=false;
+  $('audioExportStatus').textContent=result.audioIncluded?'✓ Audio track included in exported MP4.':'No audio track detected in the source video clips.';
+  say('Your '+fmtCut(total)+' montage is ready as an MP4. Choose where to save it below.');
+ }catch(error){if(hadSavedVideo)showExportSaveChoices();say(controller.signal.aborted?'Export stopped. You can edit and export again.':error.message||'Export failed. Try standard quality or an updated browser.',!controller.signal.aborted)}
  finally{
   const finalMessage=$('message').textContent,finalError=$('message').classList.contains('error');cancelExport=null;exportClipIndex=null;recording=false;transitionFrame=null;previewSize();
   for(const [element,disabled]of disabledStates)element.disabled=disabled;
@@ -1859,8 +1919,43 @@ for(const id of ['videoZoom','overlayScale'])$(id).oninput=()=>{$(id+'Value').te
 }
 $('opacity').oninput=e=>updateOpacityUI(e.target.value);
 updateOpacityUI($('opacity').value);
-$('downloadBtn').onclick=()=>{if(!exportedFile)return;const url=URL.createObjectURL(exportedFile),a=document.createElement('a');a.href=url;a.download=exportedFile.name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);say('Saved '+exportedFile.name+' to your browser downloads. On iPhone, use Share / AirDrop and choose Save Video to add it to Photos.')};
-$('shareBtn').onclick=async()=>{if(!exportedFile||!navigator.share)return;try{if(navigator.canShare&&!navigator.canShare({files:[exportedFile]})){say('This browser cannot share this video file. Use Save video instead.',true);return}await navigator.share({files:[exportedFile]});say('Share sheet closed. Your device controls where the video was saved or sent.')}catch(e){if(e.name!=='AbortError')say('Could not share this video. Try Save video, or export a shorter clip.',true)}};
+function isAppleMobileDevice(){return /iPad|iPhone|iPod/i.test(navigator.userAgent)||navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1}
+function showExportSaveChoices(){
+ const ios=isAppleMobileDevice(),hasShare=typeof navigator.share==='function';
+ let canShare=hasShare;
+ if(hasShare&&typeof navigator.canShare==='function'){
+  try{canShare=navigator.canShare({files:[exportedFile]})}catch{canShare=false}
+ }
+ const actions=$('saveActions');actions.style.display='grid';actions.classList.toggle('saveIos',ios&&canShare);actions.classList.toggle('saveOther',!ios||!canShare);
+ $('shareBtn').hidden=!canShare;
+ $('shareBtn').textContent=ios?'Save to Photos / Share…':'Share video…';
+ $('downloadBtn').textContent='Download MP4';
+ $('saveHelp').hidden=false;
+ $('saveHelp').textContent=ios&&canShare
+  ?'To save to Camera Roll: tap “Save to Photos / Share…” then select “Save Video” in the iPhone share sheet. “Download MP4” saves a file to Downloads / Files, not directly to Photos.'
+  :ios
+   ?'This browser cannot share this exported file directly. Tap “Download MP4” to save it in Downloads / Files. In Files, open the video and use Share → Save Video if available.'
+   :canShare
+    ?'“Download MP4” saves the video file to your downloads. “Share video…” opens your device’s available sharing options.'
+    :'“Download MP4” saves the finished video to your browser downloads.';
+}
+$('downloadBtn').onclick=()=>{
+ if(!exportedFile)return;
+ const url=URL.createObjectURL(exportedFile),a=document.createElement('a');a.href=url;a.download=exportedFile.name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);
+ say(isAppleMobileDevice()?'Downloading the MP4 to Files / Downloads. For Photos, use Save to Photos / Share and choose Save Video.':'Download started: '+exportedFile.name);
+};
+$('shareBtn').onclick=async()=>{
+ if(!exportedFile||!navigator.share)return;
+ try{
+  if(navigator.canShare&&!navigator.canShare({files:[exportedFile]})){
+   say('This browser cannot share the MP4. Download the file instead.',true);return;
+  }
+  await navigator.share({files:[exportedFile]});
+  say(isAppleMobileDevice()?'Share sheet closed. If you tapped “Save Video”, check Photos; otherwise the video was shared using your selected action.':'Share sheet closed. Check the app or destination you selected.');
+ }catch(e){
+  if(e.name!=='AbortError')say('Could not open the share sheet for this file. Try Download MP4 instead.',true);
+ }
+};
 const gpxGuides={garmin:{name:'Garmin',url:'https://support.garmin.com/en-US/?faq=W1TvTPW8JZ6LfJSfK512Q8',steps:['On a computer, sign in to Garmin Connect on the web and open Activities → All Activities.','Open the run, then select the settings gear at the top right.','Choose Export to GPX and upload the downloaded .gpx file here.'],note:'Use the activity export, not a route or course export. A route may not have timestamps.',scenes:[['CONNECT WEB','All Activities'],['RUN DETAILS','Settings gear'],['EXPORT MENU','Export to GPX']]},coros:{name:'COROS',url:'https://support.coros.com/hc/en-us/articles/360043975752-Exporting-Workout-Data-and-Uploading-to-3rd-Party-Apps',steps:['In the COROS app, open Activities and tap the run to see its details.','Open the menu at the top right and select Export Data.','Choose GPX, save or share the file, then upload it here.'],note:'COROS says its GPX option may omit heart rate. FIT can retain more data, but this editor currently accepts GPX files.',scenes:[['COROS APP','Workout'],['RUN DETAILS','Top-right menu'],['EXPORT DATA','GPX']]},suunto:{name:'Suunto',url:'https://www.suunto.com/Support/faq-articles/suunto-app/what-type-of-files-can-i-export-from-the-suunto-app/',steps:['In the Suunto app, open the recorded workout that has GPS data.','Tap the three-dot menu in the top right.','Choose Export GPX workout, save the file, then upload it here.'],note:'Choose training GPX, not route GPX. Suunto says route exports contain locations without workout timestamps; recordings without GPS cannot export GPX.',scenes:[['SUUNTO APP','Workout'],['RUN DETAILS','Three dots •••'],['EXPORT','Training as GPX']]},polar:{name:'Polar',url:'https://support.polar.com/uk-en/export-training-sessions-flow',steps:['On a computer, sign in to Polar Flow on the web and go to Diary.','Open the run and select Export at the top right.','Choose Route (GPX), then upload the file from your downloads.'],note:'Export the recorded training session. The GPX must have GPS points and timestamps for the overlay to sync.',scenes:[['POLAR FLOW WEB','Diary'],['RUN SESSION','Export'],['FILE FORMAT','GPX']]},strava:{name:'Strava',url:'https://support.strava.com/en-us/articles/15401919-how-do-i-export-my-strava-data',steps:['On the Strava website, open your own run’s activity page.','Open the More (three-dot) menu and choose Export GPX.','Upload the downloaded .gpx file here.'],note:'Use an activity with GPS. Strava says GPX exports include timestamps and recorded accessory data; activities without GPS may yield an empty file.',scenes:[['STRAVA WEB','Your activity'],['MORE MENU','Three dots •••'],['EXPORT','Export GPX']]}};
 const gpxShots={
  garmin:[{src:'brands/garmin-export.png',w:800,h:452,title:'Garmin Connect: choose Export to GPX',ring:[690,206,92,27],arrow:'M 515 330 Q 565 275 605 220',credit:'Garmin Connect screen',creditUrl:'https://support.garmin.com/en-US/?faq=W1TvTPW8JZ6LfJSfK512Q8'}],
