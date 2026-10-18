@@ -909,6 +909,7 @@ body[data-editor-step="3"] .stage .syncHelp {color:#004225!important;}
                 </select>
               </div>
             </div>
+            <p class="help" style="margin:10px 0 0;line-height:1.5"><strong>Original video audio is kept.</strong> Sound follows your clip trims, splits and order. If your browser cannot preserve the sound, export stops instead of creating a muted video.</p>
             <button id="exportBtn" class="primary" disabled="">
               Export 4K vertical video
             </button>
@@ -1237,7 +1238,7 @@ If you want to offset all timestamps of a track such that the first one is zero,
 
 </script>
 <script id="strideExportEngine">
-/* Stride Overlay video exporter: renders every frame, encodes H.264 with WebCodecs and writes an MP4 (video only). */
+/* Stride Overlay exporter: WebCodecs H.264 video + original clip AAC audio in MP4. */
 (function(){
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 function waitFor(el,name,ms,message){return new Promise((resolve,reject)=>{let done=false;const finish=fn=>value=>{if(done)return;done=true;clearTimeout(timer);el.removeEventListener(name,onOk);el.removeEventListener('error',onErr);fn(value)};const onOk=finish(resolve),onErr=finish(()=>reject(Error('This video could not be read for export.'))),timer=setTimeout(finish(()=>reject(Error(message||'The video stopped responding while exporting.'))),ms);el.addEventListener(name,onOk);el.addEventListener('error',onErr)})}
@@ -1245,11 +1246,111 @@ async function openVideo(url){const v=document.createElement('video');v.muted=tr
 async function seek(v,t){if(Math.abs(v.currentTime-t)<1e-4&&v.readyState>=2)return;const done=waitFor(v,'seeked',15000);v.currentTime=t;await done;if(v.readyState<2)await waitFor(v,'canplay',15000)}
 function presented(v){return new Promise(resolve=>{if(!v.requestVideoFrameCallback){resolve();return}let done=false;const id=v.requestVideoFrameCallback(()=>{done=true;resolve()});setTimeout(()=>{if(!done){try{v.cancelVideoFrameCallback(id)}catch{}resolve()}},120)})}
 async function pickCodec(width,height,fps,bitrate){const mbs=Math.ceil(width/16)*Math.ceil(height/16),mbps=mbs*fps,levels=[[0x28,8192,245760],[0x2a,8704,522240],[0x32,22080,589824],[0x33,36864,983040],[0x34,36864,2073600]],first=Math.max(0,levels.findIndex(([,fs,mp])=>mbs<=fs&&mbps<=mp));for(let i=first;i<levels.length;i++)for(const profile of ['64','4d','42']){const codec='avc1.'+profile+'00'+levels[i][0].toString(16).padStart(2,'0');try{const result=await VideoEncoder.isConfigSupported({codec,width,height,bitrate,framerate:fps,avc:{format:'avc'}});if(result.supported)return codec}catch{}}throw Error('This browser cannot encode H.264 video at this size. Try Standard quality or an updated Chrome, Edge or Safari.')}
+// Read only the source clips included in the montage. Decoding the source's actual
+// audio (rather than recording preview playback) keeps cuts and ordering precise.
+const AUDIO_RATE=48000;
+function mp4AudioTrackPresent(arrayBuffer){
+ const b=new Uint8Array(arrayBuffer);
+ const mp4=b.length>12&&b[4]===102&&b[5]===116&&b[6]===121&&b[7]===112; // ftyp
+ if(!mp4)return null; // Unknown format: do not silently assume it has no sound.
+ // MP4/QuickTime: handler box followed by its soun handler type.
+ for(let i=4;i+16<b.length;i++){
+  if(b[i]===104&&b[i+1]===100&&b[i+2]===108&&b[i+3]===114&&
+     b[i+12]===115&&b[i+13]===111&&b[i+14]===117&&b[i+15]===110)return true;
+ }
+ return false;
+}
+async function decodeMontageAudio(clips,sources,signal,fps){
+ const ctx=new OfflineAudioContext(2,1,AUDIO_RATE);
+ const buffers=new Map();let hasAudio=false;
+ const indices=[...new Set(clips.map(c=>c.sourceIndex))];
+ for(const i of indices){
+  if(signal.aborted)throw new DOMException('Export stopped','AbortError');
+  const file=sources[i].file;
+  if(!file)throw Error('Source video file is unavailable. Please add your videos again.');
+  let encoded;
+  try{encoded=await file.arrayBuffer()}catch{throw Error('Cannot read the sound from '+sources[i].name+'. Re-add the clip and try again.')}
+  const track=mp4AudioTrackPresent(encoded);
+  try{
+   const decoded=await ctx.decodeAudioData(encoded);
+   if(decoded.length>0&&decoded.numberOfChannels>0){
+    buffers.set(i,decoded);hasAudio=true;
+   }
+  }catch(err){
+   // A genuinely silent MP4 has no audio track. A failed decode of a known
+   // audio track is an error, never a reason to export a muted video.
+   if(track!==false)throw Error('Could not preserve audio from "'+sources[i].name+'". Its audio codec may not be supported in this browser. Try an H.264/AAC MP4 in an updated Chrome, Edge or Safari.');
+  }
+ }
+ let videoFrames=0;
+ const sections=clips.map(clip=>{
+  const startSample=Math.round(videoFrames/fps*AUDIO_RATE);
+  videoFrames+=Math.max(1,Math.round((clip.end-clip.start)*fps));
+  const endSample=Math.round(videoFrames/fps*AUDIO_RATE);
+  return {startSample,endSample,sourceOffset:clip.start*AUDIO_RATE,buffer:buffers.get(clip.sourceIndex)||null};
+ });
+ return {hasAudio,sections,totalSamples:Math.round(videoFrames/fps*AUDIO_RATE)};
+}
+async function encodeMontageAudio(plan,muxer,signal){
+ if(!plan.hasAudio)return;
+ if(!window.AudioEncoder||!window.AudioData)throw Error('This browser cannot export audio with MP4. Your video was NOT exported without sound. Use an updated Chrome, Edge or Safari with audio encoding support.');
+ const config={codec:'mp4a.40.2',sampleRate:AUDIO_RATE,numberOfChannels:2,bitrate:128000};
+ let support;
+ try{support=await AudioEncoder.isConfigSupported(config)}catch{}
+ if(!support?.supported)throw Error('AAC audio encoding is not supported in this browser. The exporter will not silently discard your video audio. Try Chrome or Edge on a computer.');
+ let audioError=null;
+ const encoder=new AudioEncoder({
+  output:(chunk,metadata)=>{try{muxer.addAudioChunk(chunk,metadata)}catch(err){audioError=err}},
+  error:err=>{audioError=err}
+ });
+ try{
+  encoder.configure(config);
+  let sectionIndex=0,cachedSection=-1,leftChannel=null,rightChannel=null;
+  const blockSize=1024;
+  for(let pos=0;pos<plan.totalSamples;pos+=blockSize){
+   if(signal.aborted)throw new DOMException('Export stopped','AbortError');
+   const count=Math.min(blockSize,plan.totalSamples-pos);
+   const planar=new Float32Array(count*2);
+   for(let j=0;j<count;j++){
+    const sample=pos+j;
+    while(sectionIndex<plan.sections.length-1&&sample>=plan.sections[sectionIndex].endSample)sectionIndex++;
+    const segment=plan.sections[sectionIndex];
+    if(cachedSection!==sectionIndex){
+     cachedSection=sectionIndex;leftChannel=segment?.buffer?.getChannelData(0)||null;
+     rightChannel=segment?.buffer?.getChannelData(Math.min(1,segment.buffer.numberOfChannels-1))||null;
+    }
+    if(!segment?.buffer||sample<segment.startSample||sample>=segment.endSample)continue;
+    const buffer=segment.buffer;
+    const sourceSample=segment.sourceOffset+(sample-segment.startSample);
+    const first=Math.floor(sourceSample),fraction=sourceSample-first;
+    if(first<0||first>=buffer.length)continue;
+    const next=Math.min(first+1,buffer.length-1);
+    planar[j]=leftChannel[first]+(leftChannel[next]-leftChannel[first])*fraction;
+    planar[count+j]=rightChannel[first]+(rightChannel[next]-rightChannel[first])*fraction;
+   }
+   const audio=new AudioData({format:'f32-planar',sampleRate:AUDIO_RATE,numberOfFrames:count,numberOfChannels:2,timestamp:Math.round(pos*1e6/AUDIO_RATE),data:planar});
+   try{encoder.encode(audio)}finally{audio.close()}
+   while(encoder.encodeQueueSize>10&&!audioError){
+    if(signal.aborted)throw new DOMException('Export stopped','AbortError');
+    await sleep(4);
+   }
+   if(audioError)throw audioError;
+  }
+  await encoder.flush();
+  if(audioError)throw audioError;
+ }finally{try{if(encoder.state!=='closed')encoder.close()}catch{}}
+}
 async function run(options){
  const {canvas,clips,sources,fps,bitrate,signal,render,progress}=options,width=canvas.width,height=canvas.height;
  if(!window.VideoEncoder||!window.VideoFrame)throw Error('Video export needs an updated Safari, Chrome or Edge.');
  if(!window.Mp4Muxer)throw Error('The video exporter did not load. Refresh the page and try again.');
- const codec=await pickCodec(width,height,fps,bitrate),target=new Mp4Muxer.ArrayBufferTarget(),muxer=new Mp4Muxer.Muxer({target,video:{codec:'avc',width,height,frameRate:fps},fastStart:'in-memory'});
+ const audioPlan=await decodeMontageAudio(clips,sources,signal,fps);
+ if(audioPlan.hasAudio){
+  if(!window.AudioEncoder||!window.AudioData)throw Error('Your browser cannot export MP4 files with sound. No muted export was created. Please use an updated Chrome, Edge or Safari.');
+  const check=await AudioEncoder.isConfigSupported({codec:'mp4a.40.2',sampleRate:AUDIO_RATE,numberOfChannels:2,bitrate:128000});
+  if(!check.supported)throw Error('This browser cannot encode AAC audio. Please use a browser with AAC WebCodecs audio encoding; the original sound has not been discarded.');
+ }
+ const codec=await pickCodec(width,height,fps,bitrate),target=new Mp4Muxer.ArrayBufferTarget(),muxer=new Mp4Muxer.Muxer({target,video:{codec:'avc',width,height,frameRate:fps},...(audioPlan.hasAudio?{audio:{codec:'aac',numberOfChannels:2,sampleRate:AUDIO_RATE}}:{}),firstTimestampBehavior:'offset',fastStart:'in-memory'});
  let encoderError=null;const encoder=new VideoEncoder({output:(chunk,meta)=>{try{muxer.addVideoChunk(chunk,meta)}catch(e){encoderError=e}},error:e=>{encoderError=e}});
  encoder.configure({codec,width,height,bitrate,framerate:fps,latencyMode:'quality',avc:{format:'avc'}});
  const counts=clips.map(c=>Math.max(1,Math.round((c.end-c.start)*fps))),total=counts.reduce((a,b)=>a+b,0),videos=new Map(),frameDuration=Math.round(1e6/fps);
@@ -1273,6 +1374,11 @@ async function run(options){
   }
   if(aborted)return{blob:new Blob([]),type:'video/mp4',extension:'mp4',dispose:done.dispose};
   await encoder.flush();if(encoderError)throw encoderError;
+  // Write the source audio in montage order, using the same precise trim boundaries.
+  // Every section has its own samples, so split/reordered clips cannot borrow
+  // sound from their neighbour. Silent sections are padded with silence.
+  await encodeMontageAudio(audioPlan,muxer,signal);
+  if(signal.aborted)throw new DOMException('Export stopped','AbortError');
   muxer.finalize();progress(1,total,total);
   return{blob:new Blob([target.buffer],{type:'video/mp4'}),type:'video/mp4',extension:'mp4',dispose:done.dispose};
  }finally{
@@ -1693,7 +1799,7 @@ async function exportClip(){
  const started=performance.now();let lastProgress=0;
  cancelExport=()=>{controller.abort();$('stopExport').disabled=true;say('Stopping export…')};
  try{
-  say('Rendering every frame at '+fps+' fps. Slower devices may take longer; video quality is preserved.');
+  say('Rendering video and preserving original clip audio at '+fps+' fps. Slower devices may take longer.');
   const engine=await loadExportEngine();
   const result=await engine.run({canvas,clips,sources:sourceClips.map(c=>({...c,slices:c.slices.map(s=>({...s}))})),fps,bitrate,signal:controller.signal,
    render:frame=>{exportClipIndex=frame.sourceIndex;if(frame.firstInSegment&&frame.segmentIndex){const oldFrame=snapshotFrame();startTransition(oldFrame);transitionStarted=frame.segmentStart*1000}draw(frame.outputTime*1000,{...frame,noOverlay:!!clips[frame.segmentIndex]?.noOverlay})},
@@ -1703,7 +1809,7 @@ async function exportClip(){
   const filename='stride-overlay-montage-'+$('aspect').value.replace(':','x')+'-'+Date.now()+'.'+result.extension;
   const previousCleanup=exportFileCleanup;exportedFile=new File([result.blob],filename,{type:result.type});exportFileCleanup=result.dispose;await previousCleanup?.();
   $('saveActions').style.display='grid';$('saveActions').style.gridTemplateColumns=navigator.share?'1fr 1fr':'1fr';$('shareBtn').hidden=!navigator.share;
-  say('Your '+fmtCut(total)+' montage is ready at '+fps+' fps as '+result.extension.toUpperCase()+'. '+(navigator.share?'Use Share / AirDrop or Save video.':'Use Save video to download.'));
+  say('Your '+fmtCut(total)+' montage is ready at '+fps+' fps as '+result.extension.toUpperCase()+' with original clip audio where present. '+(navigator.share?'Use Share / AirDrop or Save video.':'Use Save video to download.'));
  }catch(error){if(hadSavedVideo)$('saveActions').style.display='grid';say(controller.signal.aborted?'Export stopped. You can edit and export again.':error.message||'Export failed. Try standard quality or an updated browser.',!controller.signal.aborted)}
  finally{
   const finalMessage=$('message').textContent,finalError=$('message').classList.contains('error');cancelExport=null;exportClipIndex=null;recording=false;transitionFrame=null;previewSize();

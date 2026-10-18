@@ -1,22 +1,17 @@
-STRIDE OVERLAY – VERSION 35
+Stride Overlay Version 36 — Original audio preservation
 
-Included files:
-- stride-overlay.html — full Stride Overlay application
-- index.html — directs GitHub Pages visitors to stride-overlay.html
-- README.txt — these notes
+Upload both HTML files to your GitHub Pages publishing directory:
+- stride-overlay.html : complete editing tool
+- index.html : redirects strideoverlay.com to stride-overlay.html
 
-Version 35 updates:
-- On mobile, Add media, Add text and Transitions open as bottom sheets.
-- Each sheet has a visible pull handle. Swipe down from the handle or tap it to close.
-- The video preview stays unobstructed above the sheets so editing remains visible.
-- Add media, text, and transition controls retain their existing operations.
-- Existing mobile Edit Overlay panel also supports a downward swipe on its header.
-- Desktop popups retain their former layout.
+Audio update:
+- Original source clip audio is decoded, cut to the same sections as video and encoded into the exported MP4 as AAC.
+- When parts are trimmed out, their audio is removed too. Reordered clips retain their own audio.
+- If an uploaded clip has no audio, that section is silent.
+- When a browser cannot decode or encode detected source audio, export fails visibly instead of silently downloading a muted file.
+- The implementation requires a browser with WebCodecs VideoEncoder, AudioEncoder and AAC encoding support.
 
-GitHub Pages: extract the ZIP and upload BOTH HTML files into the directory
-published by your GitHub Pages workflow, retaining your existing assets.
-Commit and deploy. The root domain uses index.html to redirect to
-stride-overlay.html.
-
-Test mobile touch gestures, file uploads, text editing, and full video export
-on your target devices before publishing to production.
+Known limitations:
+- Audio must be decodable by the browser; some unusual audio codecs and some browsers will be unsupported.
+- Long or very large files may exceed device memory because browser audio decoding loads sources into memory.
+- Browser-level export with actual running footage should be verified before publishing to the live site.
