@@ -1159,11 +1159,13 @@ body[data-editor-step="3"] .stage .syncHelp {color:#004225!important;}
   </aside>
   <div class="studioShade" id="studioShade" hidden></div>
 <div id="studioMediaPanel" class="studioQuickPanel studioMediaPanel" role="dialog" aria-label="Add media" hidden>
+  <button class="studioSheetPull" type="button" aria-label="Swipe down or tap to close panel" title="Swipe down to close"><span aria-hidden="true"></span></button>
   <div class="studioQuickPanelHeading"><strong>Add media</strong><button type="button" class="studioQuickClose" data-close-quick aria-label="Close media menu">×</button></div>
   <button type="button" id="studioAddVideoChoice" class="studioMediaChoice"><span class="studioMediaChoiceIcon" aria-hidden="true">▣</span><span><strong>Add video clips</strong><small>Select one or multiple videos</small></span></button>
   <button type="button" id="studioAddActivityChoice" class="studioMediaChoice"><span class="studioMediaChoiceIcon" aria-hidden="true">⌁</span><span><strong>Add activity file</strong><small>GPX, FIT or TCX</small></span></button>
 </div>
 <div id="studioTextPanel" class="studioQuickPanel" role="dialog" aria-label="Text on video" hidden>
+  <button class="studioSheetPull" type="button" aria-label="Swipe down or tap to close panel" title="Swipe down to close"><span aria-hidden="true"></span></button>
   <div class="studioQuickPanelHeading"><strong>Add text</strong><div class="studioTextHeadingActions"><button type="button" id="studioClearCaption" class="studioDeleteText" aria-label="Delete selected text" title="Delete selected text" hidden><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M10 4h4M6 7l1 13h10l1-13M10 11v6M14 11v6"/></svg><span>Delete text</span></button><button type="button" class="studioQuickClose" data-close-quick aria-label="Close text settings">×</button></div></div>
   <p id="studioTextClipHint">Select a video clip to add a caption.</p>
   <label for="studioCaptionText">Text for this clip</label>
@@ -1188,6 +1190,7 @@ body[data-editor-step="3"] .stage .syncHelp {color:#004225!important;}
   <small>Drag text in the preview to position and resize it. Drag the blue text clip above the video timeline to adjust when it appears.</small>
 </div>
 <div id="studioTransitionPanel" class="studioQuickPanel" role="dialog" aria-label="Clip transitions" hidden>
+  <button class="studioSheetPull" type="button" aria-label="Swipe down or tap to close panel" title="Swipe down to close"><span aria-hidden="true"></span></button>
   <div class="studioQuickPanelHeading"><strong>Transitions</strong><button type="button" class="studioQuickClose" data-close-quick aria-label="Close transitions">×</button></div>
   <div id="studioTransitionSlot"></div>
   <p>Choose how adjacent clips and cuts join. The selected effect applies at each cut.</p>
@@ -2289,8 +2292,8 @@ header .brandWord{min-width:0!important}
  const originalTransition=document.querySelector('.studioEditorDock .editorTransition');
  if(originalTransition)$('studioTransitionSlot').append(originalTransition);
  function hideQuick(){textPanel.hidden=true;transitionPanel.hidden=true;mediaPanel.hidden=true;buttons.forEach(b=>b.setAttribute('aria-expanded','false'))}
- function placePanel(panel){const rect=dock.getBoundingClientRect(),headerBottom=document.querySelector('header')?.getBoundingClientRect().bottom||65;panel.style.maxHeight=Math.max(150,Math.min(440,rect.top-headerBottom-23))+'px';panel.style.bottom=Math.max(12,window.innerHeight-rect.top+10)+'px'}
- function toggle(panel,button){const open=panel.hidden;hideQuick();if(open){panel.hidden=false;button.setAttribute('aria-expanded','true');placePanel(panel);if(panel===textPanel){input.focus({preventScroll:true});document.dispatchEvent(new Event('stride:text-opened'))}else $('transitionMode')?.focus({preventScroll:true})}}
+ function placePanel(panel){if(window.matchMedia('(max-width:800px)').matches){panel.style.removeProperty('max-height');panel.style.removeProperty('bottom');return;}const rect=dock.getBoundingClientRect(),headerBottom=document.querySelector('header')?.getBoundingClientRect().bottom||65;panel.style.maxHeight=Math.max(150,Math.min(440,rect.top-headerBottom-23))+'px';panel.style.bottom=Math.max(12,window.innerHeight-rect.top+10)+'px'}
+ function toggle(panel,button){const open=panel.hidden;hideQuick();if(open){panel.hidden=false;button.setAttribute('aria-expanded','true');placePanel(panel);if(panel===textPanel){if(!window.matchMedia('(max-width:800px)').matches)input.focus({preventScroll:true});document.dispatchEvent(new Event('stride:text-opened'))}else if(!window.matchMedia('(max-width:800px)').matches)$('transitionMode')?.focus({preventScroll:true})}}
  function readText(){return window.StrideStudioCaptions?.get()||{hasClip:false,caption:{}}}
  function syncText(){const {hasClip,index,caption}=readText();text.disabled=!hasClip; text.title=hasClip?'Add text':'Add a video first to add text';
   $('studioTextClipHint').textContent=hasClip?'Editing text on Clip '+(index+1):'Upload and select a video clip to add text.';
@@ -2693,5 +2696,168 @@ setInterval(()=>{if(document.hidden)return;updateGuide();if(drag||pointer)return
  .studioExportDrawer #exportSpot:not([hidden]) .adsbygoogle{min-height:190px}
 }
 </style>
+
+<!-- Stride Overlay v35: reachable, swipe-to-close mobile quick-tool sheets. -->
+<style id="stride-mobile-quick-sheets-v35">
+.studioSheetPull{display:none}
+@media (max-width:800px){
+  /* The panels sit over the editor dock rather than covering the video preview. */
+  #studioMediaPanel{--studio-quick-height:min(30dvh,255px)}
+  #studioTextPanel{--studio-quick-height:min(43dvh,385px)}
+  #studioTransitionPanel{--studio-quick-height:min(46dvh,415px)}
+  .studioQuickPanel:not([hidden]),
+  #studioTransitionPanel.studioQuickPanel:not([hidden]){
+    position:fixed!important;
+    inset:auto 0 0!important;
+    top:auto!important;bottom:0!important;left:0!important;right:0!important;
+    box-sizing:border-box!important;
+    display:flex!important;flex-direction:column!important;
+    width:100%!important;max-width:none!important;
+    height:var(--studio-quick-height)!important;
+    max-height:var(--studio-quick-height)!important;
+    min-height:0!important;
+    padding:6px 16px max(18px,env(safe-area-inset-bottom))!important;
+    margin:0!important;
+    border:1px solid #c6dacb!important;border-bottom:0!important;
+    border-radius:21px 21px 0 0!important;
+    background:#fcfffc!important;
+    box-shadow:0 -12px 36px #17382c28!important;
+    transform:translate3d(0,var(--sheet-drag,0px),0);
+    z-index:110!important;
+    overflow-x:hidden!important;overflow-y:auto!important;
+    overscroll-behavior:contain;
+    -webkit-overflow-scrolling:touch;
+    scrollbar-width:thin;
+    gap:10px;
+    animation:strideSheetIn .2s ease-out;
+  }
+  .layout>.panel.studioOpen{transform:translateY(var(--overlay-drag,0px))!important}
+  .studioSheetPull{
+    display:flex!important;align-items:center;justify-content:center;
+    flex:0 0 22px;min-height:22px;width:100%;padding:0;margin:0;
+    border:0;background:transparent;color:#004225;cursor:grab;
+    touch-action:none;user-select:none;-webkit-user-select:none;
+    position:sticky;top:-6px;z-index:3;
+  }
+  .studioSheetPull>span{display:block;width:43px;height:5px;background:#accab5;border-radius:999px;transition:background .15s}
+  .studioSheetPull:hover>span,.studioSheetPull:focus-visible>span{background:#004225}
+  .studioSheetPull:active{cursor:grabbing}
+  .studioQuickPanelHeading{position:sticky;top:16px;z-index:2;background:#fcfffc;
+    border-bottom:1px solid #e3ebe4;padding-bottom:9px;flex:0 0 auto;
+  }
+  .studioQuickPanel .studioMediaChoice{flex:0 0 auto}
+  .studioQuickPanel .studioColourSwatches{flex:0 0 auto}
+  /* Keep a usable preview above the sheet. The lower dock is covered by the
+     sheet, without making the canvas dark or inert. */
+  body:has(.studioQuickPanel:not([hidden])) .layout>.stage .studioEditorDock{
+    flex:0 0 var(--open-quick-height)!important;
+    height:var(--open-quick-height)!important;
+    max-height:none!important;min-height:0!important;
+    pointer-events:none!important;
+    overflow:hidden!important;
+  }
+  body:has(#studioMediaPanel:not([hidden])){--open-quick-height:min(30dvh,255px)}
+  body:has(#studioTextPanel:not([hidden])){--open-quick-height:min(43dvh,385px)}
+  body:has(#studioTransitionPanel:not([hidden])){--open-quick-height:min(46dvh,415px)}
+  body:has(.studioQuickPanel:not([hidden])) .studioPreviewSurface{
+    min-height:0!important;flex:1 1 auto!important;
+    padding:8px 10px!important;
+  }
+  body:has(.studioQuickPanel:not([hidden])) .studioPreviewSurface>.canvaswrap{
+    max-width:100%!important;max-height:100%!important;
+  }
+  @keyframes strideSheetIn{from{opacity:.96;translate:0 22px}to{opacity:1;translate:0 0}}
+}
+@media (max-width:800px) and (max-height:530px){
+  #studioTextPanel{--studio-quick-height:43dvh}
+  #studioTransitionPanel{--studio-quick-height:44dvh}
+  body:has(#studioTextPanel:not([hidden])){--open-quick-height:43dvh}
+  body:has(#studioTransitionPanel:not([hidden])){--open-quick-height:44dvh}
+}
+@media (prefers-reduced-motion:reduce){
+  .studioQuickPanel{animation:none!important;transition:none!important}
+}
+</style>
+
+
+<script id="stride-mobile-sheet-swipe-v35">
+(()=>{
+ const isMobile=()=>window.matchMedia('(max-width:800px)').matches;
+ const ids=['studioMediaPanel','studioTextPanel','studioTransitionPanel'];
+ for(const id of ids){
+  const panel=document.getElementById(id);
+  if(!panel)continue;
+  const handle=panel.querySelector('.studioSheetPull');
+  const heading=panel.querySelector('.studioQuickPanelHeading');
+  let drag=null,suppressClick=false;
+  function reset(){panel.style.removeProperty('--sheet-drag');panel.style.removeProperty('transition');drag=null}
+  for(const surface of [handle,heading]){
+   if(!surface)continue;
+   surface.addEventListener('pointerdown',e=>{
+    if(!isMobile()||panel.hidden||e.button!==0||e.target.closest('.studioQuickClose,.studioDeleteText'))return;
+    drag={pointerId:e.pointerId,startY:e.clientY,lastY:e.clientY,startTime:performance.now(),surface};
+    suppressClick=false;
+    try{surface.setPointerCapture(e.pointerId)}catch(_e){}
+    panel.style.transition='none';
+   });
+   surface.addEventListener('pointermove',e=>{
+    if(!drag||drag.pointerId!==e.pointerId||drag.surface!==surface)return;
+    e.preventDefault();
+    drag.lastY=e.clientY;
+    const down=Math.max(0,e.clientY-drag.startY);
+    panel.style.setProperty('--sheet-drag',Math.round(down)+'px');
+   });
+   surface.addEventListener('pointerup',e=>{
+    if(!drag||drag.pointerId!==e.pointerId||drag.surface!==surface)return;
+    const down=Math.max(0,e.clientY-drag.startY);
+    const fastDown=down>32 && ((e.clientY-drag.startY)/Math.max(1,performance.now()-drag.startTime))>.55;
+    if(down>Math.min(82,panel.getBoundingClientRect().height*.24)||fastDown){
+      suppressClick=true;
+      reset();
+      panel.querySelector('[data-close-quick]')?.click();
+    }else{
+      if(down>5)suppressClick=true;
+      panel.style.transition='transform .18s ease-out';
+      panel.style.setProperty('--sheet-drag','0px');
+      drag=null;
+      panel.addEventListener('transitionend',()=>reset(),{once:true});
+    }
+   });
+   surface.addEventListener('pointercancel',()=>reset());
+  }
+  handle?.addEventListener('click',e=>{
+   if(!isMobile())return;
+   if(suppressClick){e.preventDefault();suppressClick=false;return;}
+   panel.querySelector('[data-close-quick]')?.click();
+  });
+ }
+ // The existing overlay-editor bottom sheet already has a visible pull line.
+ // Make it swipe-close as well for consistent mobile navigation.
+ const overlayHead=document.querySelector('.layout>.panel .studioDrawerHead');
+ const overlayPanel=document.querySelector('.layout>.panel');
+ if(overlayHead&&overlayPanel){
+  let start=null;
+  overlayHead.addEventListener('pointerdown',e=>{
+   if(!isMobile()||!overlayPanel.classList.contains('studioOpen')||e.button!==0||e.target.closest('button'))return;
+   start={id:e.pointerId,y:e.clientY};
+   try{overlayHead.setPointerCapture(e.pointerId)}catch(_e){}
+  });
+  overlayHead.addEventListener('pointermove',e=>{
+   if(!start||e.pointerId!==start.id)return;
+   const distance=Math.max(0,e.clientY-start.y);
+   overlayPanel.style.setProperty('--overlay-drag',Math.round(distance)+'px');
+  });
+  overlayHead.addEventListener('pointerup',e=>{
+   if(!start||e.pointerId!==start.id)return;
+   const distance=e.clientY-start.y;
+   start=null;
+   overlayPanel.style.removeProperty('--overlay-drag');
+   if(distance>70)document.getElementById('studioSettingsClose')?.click();
+  });
+  overlayHead.addEventListener('pointercancel',()=>{start=null;overlayPanel.style.removeProperty('--overlay-drag')});
+ }
+})();
+</script>
+
 </body>
 </html>
