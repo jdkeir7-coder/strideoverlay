@@ -550,6 +550,25 @@ body[data-editor-step="3"] .stage .syncHelp {color:#004225!important;}
 .studioColourSwatches button:focus-visible{outline:3px solid #004225;outline-offset:3px}
 .studioColourCaption{color:#355e47;font-size:11px!important;margin-top:5px}
 </style>
+
+<style id="stride-play-button-consistent-colour-v33">
+/* Keep the play/pause control in Stride Overlay dark green in every active state. */
+#play:not(:disabled),
+#play:not(:disabled):hover,
+#play:not(:disabled):active,
+#play:not(:disabled):focus,
+#play:not(:disabled):focus-visible,
+#play[data-playing="true"]:not(:disabled),
+#play[data-playing="false"]:not(:disabled) {
+  background: #004225 !important;
+  background-color: #004225 !important;
+  background-image: none !important;
+  color: #ffffff !important;
+  border-color: #004225 !important;
+  opacity: 1 !important;
+  filter: none !important;
+}
+</style>
 </head>
   <body>
     <header>
@@ -2344,6 +2363,46 @@ function state(){return api()?.timeline()}
 function safeTotal(clips){return clips.reduce((n,c)=>n+c.slices.reduce((m,s)=>m+Math.max(0,s.end-s.start),0),0)}
 function getCaption(){return api()?.get().caption||{}}
 function clamp(n,min,max){return Math.max(min,Math.min(max,n))}
+// A caption is attached to a source clip. Keep its timing over footage that
+// actually remains in the montage, even after split / trim / remove operations.
+function visibleSlices(clip){return (clip?.slices||[]).filter(s=>s.end-s.start>.02).sort((a,b)=>a.start-b.start)}
+function keepStartVisible(target,duration,clip){
+ const length=Math.max(.1,Number(clip?.duration)||0),d=clamp(duration,.1,length),sections=visibleSlices(clip);
+ const requested=clamp(target,0,Math.max(0,length-d));
+ if(!sections.length)return requested;
+ const minimumVisible=Math.min(.12,d*.5);
+ let best=requested,bestDistance=Infinity;
+ for(const s of sections){
+  // Prefer keeping the full caption on one retained section, if it fits.
+  const fits=s.end-s.start>=d;
+  const min=fits?s.start:Math.max(0,s.start-d+minimumVisible);
+  const max=fits?s.end-d:Math.min(length-d,s.end-minimumVisible);
+  if(max<min)continue;
+  const candidate=clamp(requested,min,max),distance=Math.abs(candidate-requested);
+  if(distance<bestDistance){best=candidate;bestDistance=distance}
+ }
+ return bestDistance===Infinity?requested:best;
+}
+// Convert clip-local caption times into the compressed, visible montage track.
+// In particular, removed sections must NOT count towards the drag distance.
+function captionTrackRect(data,index,start,duration,preferredSlice){
+ let elapsed=0,first=null,preferred=null;
+ for(const clip of data.clips){
+  for(const [sliceIndex,sl] of clip.slices.entries()){
+   const sectionLength=Math.max(0,sl.end-sl.start);
+   if(clip.index===index){
+    const a=Math.max(sl.start,start),b=Math.min(sl.end,start+duration);
+    if(b>a+.02){
+     const segment={left:elapsed+a-sl.start,width:b-a,sourceTime:a};
+     if(!first)first=segment;
+     if(sliceIndex===preferredSlice)preferred=segment;
+    }
+   }
+   elapsed+=sectionLength;
+  }
+ }
+ return preferred||first;
+}
 function openText(){const b=$('studioQuickText');if(b&&$('studioTextPanel').hidden)b.click(); selected=true;render();}
 function render(){
  // Keep the original DOM block alive during a drag. Recreating it on pointerdown
@@ -2351,7 +2410,7 @@ function render(){
  if(drag){updateGuide();return}
  const data=state();if(!data||!data.clips.length){wrap.hidden=true;guide.hidden=true;return}
  const blocks=[];let pos=0,total=safeTotal(data.clips)||1;
- for(const c of data.clips){for(const sl of c.slices){const d=Math.max(0,sl.end-sl.start),cap=c.caption;if(cap?.text){const a=Math.max(sl.start,Number(cap.start)||0),b=Math.min(sl.end,(Number(cap.start)||0)+Math.max(.1,Number(cap.duration)||c.duration));if(b>a+.02)blocks.push({clip:c.index,start:pos+(a-sl.start),len:b-a,text:cap.text,sourceStart:a})}pos+=d}}
+ for(const c of data.clips){for(const [sliceIndex,sl] of c.slices.entries()){const d=Math.max(0,sl.end-sl.start),cap=c.caption;if(cap?.text){const a=Math.max(sl.start,Number(cap.start)||0),b=Math.min(sl.end,(Number(cap.start)||0)+Math.max(.1,Number(cap.duration)||c.duration));if(b>a+.02)blocks.push({clip:c.index,sliceIndex,start:pos+(a-sl.start),len:b-a,text:cap.text,sourceStart:a})}pos+=d}}
  wrap.hidden=!blocks.length && !selected && $('studioTextPanel').hidden;track.replaceChildren();$('studioTextTrackTime').textContent=total.toFixed(1)+'s';
  for(const item of blocks){const el=document.createElement('div');el.className='studioTextBlock'+(selected&&item.clip===data.selectedClip?' selected':'');el.style.left=item.start/total*100+'%';el.style.width=item.len/total*100+'%';el.title=item.text+' · drag to move or trim';el.innerHTML='<button type="button" class="textTrim" data-side="start" aria-label="Adjust text start"></button><span class="textBlockLabel"></span><button type="button" class="textTrim" data-side="end" aria-label="Adjust text end"></button>';el.querySelector('.textBlockLabel').textContent=item.text;
  el.addEventListener('pointerdown',e=>{
@@ -2362,7 +2421,7 @@ function render(){
   // rebuild the track and detach this element while it was being held.
   drag={id:e.pointerId,el,mode:e.target.dataset.side||'move',item,
         initial:original,startX:e.clientX,width:track.getBoundingClientRect().width,
-        clipIndex:item.clip,total};
+        clipIndex:item.clip,total,changed:false};
   selected=true;el.classList.add('selected');
   try{el.setPointerCapture(e.pointerId)}catch(_err){}
   if(item.clip!==data.selectedClip){api().select(item.clip,item.sourceStart)}
@@ -2379,32 +2438,30 @@ window.addEventListener('pointermove',e=>{
  const originalStart=Number(drag.initial.start)||0;
  const originalDuration=Math.max(.1,Number(drag.initial.duration)||3);
  let start=originalStart,duration=originalDuration;
- if(drag.mode==='move')start=clamp(originalStart+offsetSeconds,0,Math.max(0,c.duration-duration));
- else if(drag.mode==='start'){
-  const end=originalStart+originalDuration;
-  start=clamp(originalStart+offsetSeconds,0,end-.1);
-  duration=end-start;
- }else duration=clamp(originalDuration+offsetSeconds,.1,Math.max(.1,c.duration-start));
- if(!api().set({start,duration}))return;
- // Paint immediately instead of waiting for a 450ms refresh or for release.
- // The same values are already saved in the project's caption object.
- const pxPerSecond=drag.width/Math.max(.01,drag.total);
- const itemLeft=drag.item.start/drag.total*100;
- const itemWidth=drag.item.len/drag.total*100;
  if(drag.mode==='move'){
-  drag.el.style.left=itemLeft+'%';
-  drag.el.style.width=itemWidth+'%';
-  drag.el.style.transform='translate3d('+((start-originalStart)*pxPerSecond)+'px,0,0)';
+  // Clamp to the actual retained sections, not simply the original file's
+  // duration: a text card must never vanish into a trimmed-away interval.
+  start=keepStartVisible(originalStart+offsetSeconds,originalDuration,c);
  }else if(drag.mode==='start'){
-  const change=(start-originalStart)*pxPerSecond;
-  drag.el.style.transform='';
-  drag.el.style.left='calc('+itemLeft+'% + '+change+'px)';
-  drag.el.style.width='max(2px,calc('+itemWidth+'% - '+change+'px))';
+  const fixedEnd=originalStart+originalDuration;
+  start=clamp(originalStart+offsetSeconds,0,Math.max(0,fixedEnd-.1));
+  duration=fixedEnd-start;
+  // Keep at least part of the updated text interval on retained footage.
+  // When dragging a handle over an excised gap, snap to the closest valid point.
+  const snapped=keepStartVisible(start,duration,c);
+  if(snapped>start+.0001){start=Math.min(fixedEnd-.1,snapped);duration=fixedEnd-start}
  }else{
-  const change=(duration-originalDuration)*pxPerSecond;
+  duration=clamp(originalDuration+offsetSeconds,.1,Math.max(.1,c.duration-start));
+ }
+ if(!api().set({start,duration}))return;
+ drag.changed=true;
+ // Position by VISIBLE montage time, which is different from source time
+ // after trimming. Updating the held DOM element also preserves capture.
+ const rect=captionTrackRect(data,drag.clipIndex,start,duration,drag.item.sliceIndex);
+ if(rect){
   drag.el.style.transform='';
-  drag.el.style.left=itemLeft+'%';
-  drag.el.style.width='max(2px,calc('+itemWidth+'% + '+change+'px))';
+  drag.el.style.left=(rect.left/drag.total*100)+'%';
+  drag.el.style.width=(rect.width/drag.total*100)+'%';
  }
  drag.el.title='Text: '+start.toFixed(1)+'s · '+duration.toFixed(1)+'s';
  syncInputs();
@@ -2442,6 +2499,19 @@ function finishTextTrackDrag(e){
  if(!drag||(e&&drag.id!==e.pointerId))return;
  const previous=drag;drag=null;selected=true;
  try{if(previous.el.hasPointerCapture(previous.id))previous.el.releasePointerCapture(previous.id)}catch(_err){}
+ if(previous.changed){
+  const data=state(),clip=data?.clips[previous.clipIndex],caption=clip?.caption;
+  if(clip&&caption&&previous.clipIndex===data.selectedClip){
+   const duration=Math.max(.1,Number(caption.duration)||.1);
+   const visible=captionTrackRect(data,previous.clipIndex,Number(caption.start)||0,duration,previous.item.sliceIndex);
+   if(visible){
+    const target=Math.min(clip.duration,visible.sourceTime+Math.min(.12,duration*.33));
+    if(Number.isFinite(target)&&Math.abs(video.currentTime-target)>.03){
+     video.pause();try{video.currentTime=target}catch(_err){}
+    }
+   }
+  }
+ }
  syncInputs();render(); // Recalculate text blocks against trimmed sections on release.
 }
 window.addEventListener('pointerup',finishTextTrackDrag,true);
@@ -2602,5 +2672,26 @@ setInterval(()=>{if(document.hidden)return;updateGuide();if(drag||pointer)return
 }
 </style>
 
+
+<style id="stride-v34-export-ad">
+/* Give the real, provider-filled export advertisement a substantially larger
+   responsive display area without covering progress or download controls. */
+.studioExportDrawer{width:min(450px,96vw)}
+.studioExportDrawer #exportSpot:not([hidden]){
+  width:100%;min-height:300px;margin:22px 0 18px;padding:18px 14px 14px;
+  border:1px solid #bad6c2;border-radius:14px;background:#f4f9f5;
+  display:flex;flex-direction:column;gap:10px;
+}
+.studioExportDrawer #exportSpot:not([hidden]) .adLabel{
+  text-align:center;margin:0;color:#51695b;font-size:11px;letter-spacing:.1em;
+}
+.studioExportDrawer #exportSpot:not([hidden]) .adsbygoogle{
+  display:block!important;width:100%;min-height:248px;
+}
+@media(max-width:600px){
+ .studioExportDrawer #exportSpot:not([hidden]){min-height:235px;padding:12px 9px;margin:16px 0}
+ .studioExportDrawer #exportSpot:not([hidden]) .adsbygoogle{min-height:190px}
+}
+</style>
 </body>
 </html>

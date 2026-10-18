@@ -1,17 +1,17 @@
-Stride Overlay v32 — GitHub Pages deployment
+STRIDE OVERLAY – VERSION 33
 
 Files:
-  stride-overlay.html   Main single-page editing app
-  index.html            Root redirect to stride-overlay.html
+- stride-overlay.html — full Stride Overlay application
+- index.html — redirects GitHub Pages root to stride-overlay.html
+- README.txt — these instructions
 
-Upload BOTH HTML files to the publishing root of your GitHub Pages repository.
-If the repository already has favicon files or a brands/ folder, keep them in place.
-The root domain will redirect to /stride-overlay.html.
+Version 34 change: playback control stays dark green (#004225) while paused,
+playing, hovered, focused or pressed. Its rounded-square shape and white icon
+are unchanged. The disabled pre-upload state remains unchanged.
 
-New in v32:
-- Neutral charcoal framing instead of green side areas on wide or zoomed footage.
-- On phones and narrow tablets, Edit overlay opens as a bottom panel.
-- Video preview remains fully visible in the area above the bottom panel and can still be dragged/resized.
-- Clicking outside the overlay and its panel dismisses the panel as before.
+To publish on GitHub Pages: extract the ZIP and upload both HTML files to the
+published directory of your repository. Keep any existing supporting assets
+(favicons, brand images, etc.). Commit/push, then deploy with your existing
+GitHub Pages action.
 
-Video export needs a full end-to-end test with a real clip before live deployment.
+Remember to test live playback and export with sample video/activity files.
