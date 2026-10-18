@@ -1,13 +1,17 @@
-Stride Overlay — Version 29
+Stride Overlay v32 — GitHub Pages deployment
 
-Main website entry point: index.html (at the root of the ZIP).
+Files:
+  stride-overlay.html   Main single-page editing app
+  index.html            Root redirect to stride-overlay.html
 
-To deploy to GitHub Pages, put index.html in the published folder of your repository.
+Upload BOTH HTML files to the publishing root of your GitHub Pages repository.
+If the repository already has favicon files or a brands/ folder, keep them in place.
+The root domain will redirect to /stride-overlay.html.
 
-The original HTML references additional static files not present in the provided version:
-/favicon.png, /favicon.ico, /apple-touch-icon.png, /site.webmanifest,
-/brands/stride-calculator.svg, and brands/garmin.svg, brands/coros.png,
-brands/suunto.svg, brands/polar.svg, brands/strava.svg.
+New in v32:
+- Neutral charcoal framing instead of green side areas on wide or zoomed footage.
+- On phones and narrow tablets, Edit overlay opens as a bottom panel.
+- Video preview remains fully visible in the area above the bottom panel and can still be dragged/resized.
+- Clicking outside the overlay and its panel dismisses the panel as before.
 
-If those files already exist in your repository, retain them at their existing paths.
-The ZIP contains the latest supplied HTML and no fabricated replacement assets.
+Video export needs a full end-to-end test with a real clip before live deployment.
