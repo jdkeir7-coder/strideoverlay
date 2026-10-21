@@ -619,6 +619,57 @@ body[data-editor-step="3"] .stage .syncHelp {color:#004225!important;}
 .audioExportStatus{font-size:12px;line-height:1.4;color:#004225;margin:8px 0 10px;font-weight:650}
 @media(max-width:600px){#saveActions{grid-template-columns:1fr!important}#saveActions button{width:100%;min-height:50px}}
 </style>
+
+<style id="strideActivityHelpStyles">
+/* A separate info control beside the upload button: no nested buttons. */
+.studioActivityUploadWrap{position:relative;display:flex;min-width:0;min-height:0;height:100%}
+.studioActivityUploadWrap>.studioUploadButton{width:100%;height:100%;padding-right:30px!important}
+.studioActivityInfo{position:absolute;right:10px;top:10px;width:27px;height:27px;display:grid;place-items:center;z-index:5;border:1.5px solid #004225;border-radius:999px;background:#f7fff2;color:#004225;font:800 15px/1 'Manrope',Arial,sans-serif;box-shadow:0 1px 4px #0042251f;cursor:pointer;padding:0}
+.studioActivityInfo:hover,.studioActivityInfo:focus-visible{background:#92ff5f;outline:2px solid #004225;outline-offset:2px}
+.studioActivityHelpLink{width:100%;text-align:left;font-weight:700;font-size:12px;padding:10px 12px;background:#ebf8e5;color:#004225;border:1px solid #afcba9;border-radius:10px;margin-top:7px;cursor:pointer}
+.studioActivityHelpLink:hover,.studioActivityHelpLink:focus-visible{background:#c9f4bd}
+#studioActivityHelpDialog{max-width:min(560px,calc(100vw - 28px));width:100%;max-height:min(82dvh,750px);overflow:auto;overscroll-behavior:contain;border:2px solid #004225;border-radius:18px;background:#f7f9f7;color:#004225;padding:0;box-shadow:0 24px 70px #001b1460;font:500 14px/1.5 Manrope,Arial,sans-serif}
+#studioActivityHelpDialog::backdrop{background:#001b1499;backdrop-filter:blur(2px)}
+#studioActivityHelpDialog:not([open]){display:none}
+.studioActivityHelpHead{padding:18px 20px 14px;display:flex;align-items:start;justify-content:space-between;gap:12px;background:#ecf8e8;border-bottom:1px solid #c1d7bb}
+.studioActivityHelpHead h2{font-size:20px;letter-spacing:-.04em;color:#004225;margin:0 0 4px}
+.studioActivityHelpHead p{color:#4a6454;font-size:12px;margin:0}
+.studioActivityHelpClose{background:#fff;border:1px solid #99bc9e;border-radius:9px;width:34px;height:34px;font:700 23px/1 Arial,sans-serif;color:#004225;flex:none;cursor:pointer}
+.studioActivityHelpClose:hover{background:#92ff5f}
+.studioActivityHelpBody{padding:18px 20px 20px}
+.studioActivityHelpBody h3{font-size:14px;font-weight:800;color:#004225;margin:18px 0 8px}
+.studioActivityHelpBody h3:first-child{margin-top:0}
+.studioActivityHelpBody p{margin:8px 0;color:#314d3c}
+.studioActivityFormatList{display:grid;gap:7px}
+.studioActivityFormat{display:grid;grid-template-columns:50px 1fr;gap:10px;align-items:start;padding:11px;border:1px solid #ccdccc;border-radius:10px;background:#fff}
+.studioActivityFormat strong{background:#e2f7d6;border:1px solid #a9d195;border-radius:7px;padding:3px 4px;text-align:center;font-size:12px}
+.studioActivityFormat p{margin:0;font-size:12px;line-height:1.5}
+.studioActivityTip{padding:11px 13px;border-left:4px solid #004225;border-radius:7px;background:#e8f7df;font-size:12px;color:#234c32!important}
+.studioActivitySources{display:grid;gap:7px}
+.studioActivitySources details{border:1px solid #d4dfd1;background:#fff;border-radius:10px;padding:9px 12px}
+.studioActivitySources summary{cursor:pointer;font-weight:800;list-style-position:inside;color:#004225}
+.studioActivitySources p{font-size:12px;padding-left:2px}
+.studioActivitySources a{color:#005e39;font-size:12px;text-underline-offset:3px}
+.studioActivityHelpFooter{display:flex;justify-content:flex-end;border-top:1px solid #d5e2d1;padding:12px 20px 16px}
+.studioActivityHelpDone{background:#004225;color:#fff;border:0;border-radius:10px;padding:10px 16px;font-weight:800;cursor:pointer}
+.studioActivityHelpDone:hover{background:#126943}
+/* Keep the Stride Calculator dropdown reachable on small screens too. */
+@media(max-width:980px){
+ header .headerMenuWrap{display:block!important;flex:0 0 auto!important}
+ .headerMenuWrap .mobileMenuToggle{display:flex!important}
+}
+@media(max-width:540px){
+ header .headerMenuWrap{display:block!important;grid-column:1!important;grid-row:2!important;align-self:center!important;justify-self:start!important;margin:0!important;z-index:120!important}
+ .headerMenuWrap .mobileMenu{left:0!important;right:auto!important;max-width:calc(100vw - 24px)!important}
+}
+@media(max-width:600px){
+ #studioActivityHelpDialog{max-width:100vw;width:100vw;max-height:88dvh;position:fixed;top:auto;bottom:0;margin:0;border-radius:20px 20px 0 0;border-bottom:0;}
+ .studioActivityHelpHead{padding:17px 16px 13px}
+ .studioActivityHelpBody{padding:12px 16px 16px}
+ .studioActivityInfo{top:7px;right:7px;width:24px;height:24px;font-size:13px}
+ .studioActivityUploadWrap>.studioUploadButton{padding-right:25px!important}
+}
+</style>
 </head>
   <body>
     <header>
@@ -641,7 +692,7 @@ body[data-editor-step="3"] .stage .syncHelp {color:#004225!important;}
           <button id="openGuide" type="button">
             How to use Stride Overlay
           </button>
-          <a class="calculatorMenuLink" href="https://stridecalculator.com/">          <img src="/brands/stride-calculator.svg" alt="" aria-hidden="true" />
+          <a class="calculatorMenuLink" href="https://stridecalculator.com/">          <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNTYiIGhlaWdodD0iMjU2IiB2aWV3Qm94PSIwIDAgNjQgNjQiIHJvbGU9ImltZyIgYXJpYS1sYWJlbD0iU3RyaWRlIENhbGN1bGF0b3IgbG9nbyI+CjxyZWN0IGZpbGw9IiMwMDQyMjUiIGhlaWdodD0iNjQiIHJ4PSIxMiIgd2lkdGg9IjY0Ij4KPC9yZWN0Pgo8cmVjdCBmaWxsPSIjOTJmZjVmIiBoZWlnaHQ9IjQ2IiByeD0iNSIgd2lkdGg9IjMwIiB4PSIxNyIgeT0iOSI+CjwvcmVjdD4KPHJlY3QgZmlsbD0iIzAwNDIyNSIgaGVpZ2h0PSIxMSIgcng9IjEuNSIgd2lkdGg9IjIwIiB4PSIyMiIgeT0iMTUiPgo8L3JlY3Q+CjxnIGZpbGw9IiMwMDQyMjUiPgo8cmVjdCBoZWlnaHQ9IjYiIHJ4PSIxLjMiIHdpZHRoPSI2IiB4PSIyMSIgeT0iMzAiPgo8L3JlY3Q+CjxyZWN0IGhlaWdodD0iNiIgcng9IjEuMyIgd2lkdGg9IjYiIHg9IjI5IiB5PSIzMCI+CjwvcmVjdD4KPHJlY3QgaGVpZ2h0PSI2IiByeD0iMS4zIiB3aWR0aD0iNiIgeD0iMzciIHk9IjMwIj4KPC9yZWN0Pgo8cmVjdCBoZWlnaHQ9IjYiIHJ4PSIxLjMiIHdpZHRoPSI2IiB4PSIyMSIgeT0iMzgiPgo8L3JlY3Q+CjxyZWN0IGhlaWdodD0iNiIgcng9IjEuMyIgd2lkdGg9IjYiIHg9IjI5IiB5PSIzOCI+CjwvcmVjdD4KPHJlY3QgaGVpZ2h0PSI2IiByeD0iMS4zIiB3aWR0aD0iNiIgeD0iMzciIHk9IjM4Ij4KPC9yZWN0Pgo8cmVjdCBoZWlnaHQ9IjYiIHJ4PSIxLjMiIHdpZHRoPSI2IiB4PSIyMSIgeT0iNDYiPgo8L3JlY3Q+CjxyZWN0IGhlaWdodD0iNiIgcng9IjEuMyIgd2lkdGg9IjYiIHg9IjI5IiB5PSI0NiI+CjwvcmVjdD4KPHJlY3QgaGVpZ2h0PSI2IiByeD0iMS4zIiB3aWR0aD0iNiIgeD0iMzciIHk9IjQ2Ij4KPC9yZWN0Pgo8L2c+Cjwvc3ZnPgo=" alt="Stride Calculator logo" />
           <span>          Stride Calculator
 </span>
 </a>
@@ -959,7 +1010,7 @@ body[data-editor-step="3"] .stage .syncHelp {color:#004225!important;}
                 </select>
               </div>
             </div>
-            <p class="help" style="margin:10px 0 0;line-height:1.5"><strong>Original video audio is kept.</strong> Sound follows your clip trims, splits and order. If your browser cannot preserve the sound, export stops instead of creating a muted video.</p>
+            <p class="help" style="margin:10px 0 0;line-height:1.5"><strong>Original video audio is kept.</strong> DJI MOV/MP4 recordings with AAC sound are supported. Audio follows clip trims, splits and order. If a codec is unsupported, export stops instead of producing a muted video.</p>
             <button id="exportBtn" class="primary" disabled="">
               Export 4K vertical video
             </button>
@@ -1216,6 +1267,7 @@ body[data-editor-step="3"] .stage .syncHelp {color:#004225!important;}
   <div class="studioQuickPanelHeading"><strong>Add media</strong><button type="button" class="studioQuickClose" data-close-quick aria-label="Close media menu">×</button></div>
   <button type="button" id="studioAddVideoChoice" class="studioMediaChoice"><span class="studioMediaChoiceIcon" aria-hidden="true">▣</span><span><strong>Add video clips</strong><small>Select one or multiple videos</small></span></button>
   <button type="button" id="studioAddActivityChoice" class="studioMediaChoice"><span class="studioMediaChoiceIcon" aria-hidden="true">⌁</span><span><strong>Add activity file</strong><small>GPX, FIT or TCX</small></span></button>
+  <button type="button" id="studioActivityInfoFromMedia" class="studioActivityHelpLink" aria-haspopup="dialog" aria-controls="studioActivityHelpDialog">ⓘ&nbsp; Which activity file has lap splits?</button>
 </div>
 <div id="studioTextPanel" class="studioQuickPanel" role="dialog" aria-label="Text on video" hidden>
   <button class="studioSheetPull" type="button" aria-label="Swipe down or tap to close panel" title="Swipe down to close"><span aria-hidden="true"></span></button>
@@ -1312,6 +1364,97 @@ function mp4AudioTrackPresent(arrayBuffer){
  }
  return false;
 }
+// Video files are not guaranteed to be decodable by Web Audio. Read QuickTime/MP4
+// metadata and remux AAC packets into an *audio-only* M4A for Safari/Chrome.
+// Only small metadata and one audio chunk are read at a time, avoiding the cost of
+// loading 4K footage into memory a second time during export.
+async function readCameraAudio(file,signal){
+ const cancelled=()=>{if(signal?.aborted)throw new DOMException('Export stopped','AbortError')};
+ let pos=0,moov=null;
+ while(pos+8<=file.size){
+  cancelled();const header=new DataView(await file.slice(pos,Math.min(file.size,pos+16)).arrayBuffer());
+  const type=String.fromCharCode(...new Uint8Array(header.buffer,4,4));
+  let size=header.getUint32(0,false),headerSize=8;
+  if(size===1){if(header.byteLength<16)break;const big=header.getBigUint64(8,false);if(big>BigInt(Number.MAX_SAFE_INTEGER))break;size=Number(big);headerSize=16}
+  else if(size===0)size=file.size-pos;
+  if(size<headerSize||pos+size>file.size)break;
+  if(type==='moov'){
+   if(size>100*1024*1024)throw Error('The MOV file has unusually large metadata. Export cannot safely load its audio index.');
+   moov=await file.slice(pos+headerSize,pos+size).arrayBuffer();break;
+  }
+  pos+=size;
+ }
+ if(!moov)return {hasAudio:false,unsupported:true};
+ const bytes=new Uint8Array(moov),view=new DataView(moov);
+ const u32=i=>view.getUint32(i,false),u16=i=>view.getUint16(i,false);
+ const tag=i=>String.fromCharCode(bytes[i],bytes[i+1],bytes[i+2],bytes[i+3]);
+ function boxes(start,end){
+  const a=[];
+  for(let p=start;p+8<=end;){
+   let n=u32(p),head=8;if(n===1){if(p+16>end)break;const big=view.getBigUint64(p+8,false);if(big>BigInt(Number.MAX_SAFE_INTEGER))break;n=Number(big);head=16}else if(n===0)n=end-p;
+   if(n<head||p+n>end)break;
+   a.push({type:tag(p+4),data:p+head,end:p+n});p+=n;
+  }
+  return a;
+ }
+ const child=(b,name)=>boxes(b.data,b.end).find(x=>x.type===name);
+ let hasAudio=false;
+ for(const trak of boxes(0,bytes.length).filter(b=>b.type==='trak')){
+  const mdia=child(trak,'mdia'),hdlr=mdia&&child(mdia,'hdlr');
+  if(!hdlr||tag(hdlr.data+8)!=='soun')continue;
+  hasAudio=true;
+  const mdhd=child(mdia,'mdhd'),minf=child(mdia,'minf'),stbl=minf&&child(minf,'stbl');
+  if(!stbl||!mdhd)continue;
+  const stsd=child(stbl,'stsd'),stsz=child(stbl,'stsz'),stsc=child(stbl,'stsc'),stts=child(stbl,'stts'),stco=child(stbl,'stco')||child(stbl,'co64');
+  if(!stsd||!stsz||!stsc||!stts||!stco)continue;
+  const entry=boxes(stsd.data+8,stsd.end)[0];
+  if(!entry||entry.type!=='mp4a')continue;
+  const channels=u16(entry.data+16),sampleRate=u32(entry.data+24)/65536;
+  const mdhdVersion=bytes[mdhd.data],timescale=u32(mdhd.data+(mdhdVersion===1?20:12));
+  const validRates=[96000,88200,64000,48000,44100,32000,24000,22050,16000,12000,11025,8000,7350];
+  if(!validRates.includes(sampleRate)||channels<1||channels>2||!timescale)continue;
+  let off=stsz.data+4;const uniformSize=u32(off),sampleCount=u32(off+4);off+=8;
+  if(!sampleCount||sampleCount>1000000||(!uniformSize&&off+sampleCount*4>stsz.end))continue;
+  const sizes=uniformSize?null:Uint32Array.from({length:sampleCount},(_,i)=>u32(off+i*4));
+  const chunkCount=u32(stco.data+4),width=stco.type==='co64'?8:4;
+  if(!chunkCount||chunkCount>1000000||stco.data+8+chunkCount*width>stco.end)continue;
+  const chunkOffsets=[];
+  for(let i=0;i<chunkCount;i++){
+   const loc=stco.data+8+i*width;
+   const value=width===8?view.getBigUint64(loc,false):BigInt(u32(loc));
+   if(value>BigInt(Number.MAX_SAFE_INTEGER))break;
+   chunkOffsets.push(Number(value));
+  }
+  if(chunkOffsets.length!==chunkCount)continue;
+  const scCount=u32(stsc.data+4),tsCount=u32(stts.data+4);
+  if(scCount>100000||tsCount>100000||!scCount||!tsCount||stsc.data+8+scCount*12>stsc.end||stts.data+8+tsCount*8>stts.end)continue;
+  const sc=Array.from({length:scCount},(_,i)=>{const p=stsc.data+8+i*12;return {first:u32(p),count:u32(p+4)}});
+  const ts=Array.from({length:tsCount},(_,i)=>{const p=stts.data+8+i*8;return {count:u32(p),delta:u32(p+4)}});
+  const target=new Mp4Muxer.ArrayBufferTarget();
+  const muxer=new Mp4Muxer.Muxer({target,audio:{codec:'aac',numberOfChannels:channels,sampleRate},fastStart:'in-memory',firstTimestampBehavior:'offset'});
+  let sample=0,scIndex=0,tsIndex=0,remaining=ts[0].count,time=0;
+  for(let ci=0;ci<chunkCount&&sample<sampleCount;ci++){
+   cancelled();while(scIndex<sc.length-1&&ci+1>=sc[scIndex+1].first)scIndex++;
+   const count=Math.min(sc[scIndex].count,sampleCount-sample);
+   if(!count)continue;
+   let length=0;for(let j=0;j<count;j++)length+=uniformSize||sizes[sample+j];
+   const start=chunkOffsets[ci];if(start<0||length<1||start+length>file.size)throw Error('Could not read complete camera audio from this MOV.');
+   const data=new Uint8Array(await file.slice(start,start+length).arrayBuffer());let cursor=0;
+   for(let j=0;j<count;j++,sample++){
+    const size=uniformSize||sizes[sample];
+    while(remaining===0&&tsIndex<ts.length-1){tsIndex++;remaining=ts[tsIndex].count}
+    const delta=ts[tsIndex].delta;remaining--;
+    muxer.addAudioChunkRaw(data.subarray(cursor,cursor+size),'key',Math.round(time/timescale*1e6),Math.round(delta/timescale*1e6));
+    cursor+=size;time+=delta;
+   }
+  }
+  if(sample!==sampleCount)throw Error('The camera recording has incomplete audio timestamps.');
+  muxer.finalize();
+  return {hasAudio:true,audioOnly:target.buffer};
+ }
+ return {hasAudio}; // A track is present, but it is not a supported AAC track.
+}
+
 async function decodeMontageAudio(clips,sources,signal,fps){
  const ctx=new OfflineAudioContext(2,1,AUDIO_RATE);
  const buffers=new Map();let hasAudio=false;
@@ -1320,18 +1463,29 @@ async function decodeMontageAudio(clips,sources,signal,fps){
   if(signal.aborted)throw new DOMException('Export stopped','AbortError');
   const file=sources[i].file;
   if(!file)throw Error('Source video file is unavailable. Please add your videos again.');
-  let encoded;
-  try{encoded=await file.arrayBuffer()}catch{throw Error('Cannot read the sound from '+sources[i].name+'. Re-add the clip and try again.')}
-  const track=mp4AudioTrackPresent(encoded);
-  try{
-   const decoded=await ctx.decodeAudioData(encoded);
-   if(decoded.length>0&&decoded.numberOfChannels>0){
-    buffers.set(i,decoded);hasAudio=true;
+  // Safari often refuses decodeAudioData(full MOV), even for AAC that it plays.
+  // Demux only its audio samples into a small M4A rather than reading the whole
+  // 4K recording in memory. For other formats keep the native decoder fallback.
+  let extracted=null,extractError=null,decoded=null;
+  try{extracted=await readCameraAudio(file,signal)}catch(err){
+   if(signal.aborted)throw err;extractError=err;
+  }
+  if(extracted?.hasAudio===false&&!extracted.unsupported)continue; // Truly silent source.
+  if(extracted?.audioOnly){
+   try{decoded=await ctx.decodeAudioData(extracted.audioOnly)}catch(err){extractError=err}
+  }
+  if(!decoded){
+   // The original decoder remains available for non-AAC sources or rare
+   // container variants; avoid allocating enormous movie files on phones.
+   if(file.size<=180*1024*1024){
+    try{decoded=await ctx.decodeAudioData(await file.arrayBuffer())}catch(err){extractError=err}
    }
-  }catch(err){
-   // A genuinely silent MP4 has no audio track. A failed decode of a known
-   // audio track is an error, never a reason to export a muted video.
-   if(track!==false)throw Error('Could not preserve audio from "'+sources[i].name+'". Its audio codec may not be supported in this browser. Try an H.264/AAC MP4 in an updated Chrome, Edge or Safari.');
+  }
+  if(decoded&&decoded.length>0&&decoded.numberOfChannels>0){
+   buffers.set(i,decoded);hasAudio=true;
+  }else if(extracted?.hasAudio!==false || extracted?.unsupported){
+   console.warn('Stride Overlay audio decode failed',sources[i].name,extractError);
+   throw Error('Could not read the audio in "'+sources[i].name+'" on this device. The original sound has been kept safe; no muted file was made. For unsupported audio formats, convert the recording to an H.264 video with AAC sound (.mp4), or try exporting from a desktop browser.');
   }
  }
  let videoFrames=0;
@@ -1979,7 +2133,7 @@ function closeDropdowns(except){for(const item of dropdowns){if(item===except)co
 function renderDropdown(item){const {select,menu}=item;menu.replaceChildren();for(const option of select.options){if(option.disabled||option.hidden)continue;const choice=document.createElement('button');choice.type='button';choice.className='dropdownOption';choice.role='option';choice.setAttribute('aria-selected',String(option.selected));choice.dataset.value=option.value;const icon=document.createElement('span');icon.className='dropdownIcon';icon.innerHTML=selectIcon(select.id,option.value);const label=document.createElement('span');label.className='dropdownLabel';label.textContent=option.textContent;const check=document.createElement('span');check.className='dropdownCheck';check.setAttribute('aria-hidden','true');check.textContent=option.selected?'✓':'';choice.append(icon,label,check);choice.onclick=()=>{select.value=option.value;select.dispatchEvent(new Event('change',{bubbles:true}));closeDropdowns();syncDropdowns();item.trigger.focus()};menu.append(choice)}if(!menu.children.length){const empty=document.createElement('span');empty.className='dropdownOption';empty.textContent='No choices available';menu.append(empty)}}
 function initStyledSelects(){dropdowns=[...document.querySelectorAll('select[id]')].map(select=>{const wrapper=document.createElement('div');wrapper.className='styledSelect';select.before(wrapper);wrapper.append(select);const trigger=document.createElement('button');trigger.type='button';trigger.className='dropdownTrigger';trigger.id='dropdown-'+select.id;trigger.setAttribute('aria-haspopup','listbox');trigger.setAttribute('aria-expanded','false');const originalLabel=document.querySelector(`label[for="${select.id}"]`);if(originalLabel){originalLabel.id ||= 'label-'+select.id;trigger.setAttribute('aria-labelledby',originalLabel.id+' '+trigger.id);originalLabel.addEventListener('click',event=>{event.preventDefault();trigger.click()})}else trigger.setAttribute('aria-label',select.id);const icon=document.createElement('span');icon.className='dropdownIcon';icon.setAttribute('aria-hidden','true');const label=document.createElement('span');label.className='dropdownLabel';const chevron=document.createElement('span');chevron.className='dropdownChevron';chevron.setAttribute('aria-hidden','true');trigger.append(icon,label,chevron);const menu=document.createElement('div');menu.className='dropdownMenu';menu.id='menu-'+select.id;menu.role='listbox';menu.hidden=true;trigger.setAttribute('aria-controls',menu.id);wrapper.append(trigger,menu);const item={select,trigger,menu,icon,label};trigger.onclick=()=>{if(trigger.disabled)return;const opening=menu.hidden;closeDropdowns();if(!opening)return;renderDropdown(item);menu.hidden=false;menu.classList.toggle('openUp',window.innerHeight-trigger.getBoundingClientRect().bottom<Math.min(290,menu.scrollHeight+10)&&trigger.getBoundingClientRect().top>menu.scrollHeight+15);trigger.setAttribute('aria-expanded','true')};trigger.onkeydown=e=>{if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();if(menu.hidden)trigger.click();const choices=[...menu.querySelectorAll('button')];(e.key==='ArrowDown'?choices[0]:choices.at(-1))?.focus()}else if(e.key==='Escape'){closeDropdowns()}};menu.onkeydown=e=>{const choices=[...menu.querySelectorAll('button')],i=choices.indexOf(document.activeElement);if(['ArrowDown','ArrowUp','Home','End'].includes(e.key)){e.preventDefault();const index=e.key==='Home'?0:e.key==='End'?choices.length-1:e.key==='ArrowDown'?Math.min(i+1,choices.length-1):Math.max(i-1,0);choices[index]?.focus()}else if(e.key==='Escape'){e.preventDefault();closeDropdowns();trigger.focus()}else if(e.key==='Tab')closeDropdowns()};select.addEventListener('change',syncDropdowns);new MutationObserver(syncDropdowns).observe(select,{childList:true,subtree:true,attributes:true,characterData:true});return item});document.documentElement.classList.add('enhanced-selects');document.addEventListener('pointerdown',e=>{if(!e.target.closest('.styledSelect'))closeDropdowns()});syncDropdowns()}
 
-if(window.matchMedia('(max-width:900px) and (pointer:coarse)').matches){$('resolution').value='hd';const mobileExportNote=document.createElement('p');mobileExportNote.className='help';mobileExportNote.textContent='Phones start at 1080p · 60 fps for smoother rendering. You can choose 4K above, but it may be too demanding for some devices.';$('fps').closest('.two').after(mobileExportNote)}$('exportBtn').onclick=exportClip;$('stopExport').onclick=()=>cancelExport?.();const exportMedia=window.matchMedia('(max-width:900px)');function placeExportSection(){const section=$('exportSection'),drawer=$('studioExportDrawer');if(section&&drawer&&section.parentElement!==drawer)drawer.append(section)}exportMedia.addEventListener?.('change',placeExportSection);window.addEventListener('resize',placeExportSection);placeExportSection();const pageAdMedia=window.matchMedia('(min-width:901px)');if(pageAdMedia.matches)showAd('pageAd',adSlots.page);pageAdMedia.addEventListener?.('change',event=>{if(event.matches)showAd('pageAd',adSlots.page)});setAspect();initStyledSelects();draw();
+if(window.matchMedia('(max-width:900px) and (pointer:coarse)').matches){$('resolution').value='hd';$('fps').value='30';const mobileExportNote=document.createElement('p');mobileExportNote.className='help';mobileExportNote.textContent='Phones start at 1080p · 30 fps for more reliable exporting. Choose 60 fps or 4K if your device can handle it.';$('fps').closest('.two').after(mobileExportNote)}$('exportBtn').onclick=exportClip;$('stopExport').onclick=()=>cancelExport?.();const exportMedia=window.matchMedia('(max-width:900px)');function placeExportSection(){const section=$('exportSection'),drawer=$('studioExportDrawer');if(section&&drawer&&section.parentElement!==drawer)drawer.append(section)}exportMedia.addEventListener?.('change',placeExportSection);window.addEventListener('resize',placeExportSection);placeExportSection();const pageAdMedia=window.matchMedia('(min-width:901px)');if(pageAdMedia.matches)showAd('pageAd',adSlots.page);pageAdMedia.addEventListener?.('change',event=>{if(event.matches)showAd('pageAd',adSlots.page)});setAspect();initStyledSelects();draw();
     </script>
     
 
@@ -2405,7 +2559,10 @@ header .brandWord{min-width:0!important}
  <h1>Bring your run to life</h1><p>Upload running videos and an activity file to get started.</p>
  <div class="studioUploadActions">
   <button class="studioUploadButton" id="studioVideoUpload" type="button"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" stroke-linecap="round"><rect x="2" y="4" width="20" height="16" rx="3"/><path d="M9 9l7 3-7 3z"/></svg><span>Upload videos</span><small>MP4, MOV or WebM · Multiple clips</small></button>
-  <button class="studioUploadButton" id="studioActivityUpload" type="button"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 19h16M3 16l5-7 5 5 3-4 5 6"/><path d="M8 3v5m-2-2h4"/></svg><span>Upload activity</span><small>GPX, TCX or FIT</small></button>
+  <div class="studioActivityUploadWrap">
+   <button class="studioUploadButton" id="studioActivityUpload" type="button"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 19h16M3 16l5-7 5 5 3-4 5 6"/><path d="M8 3v5m-2-2h4"/></svg><span>Upload activity</span><small>GPX, TCX or FIT</small></button>
+   <button class="studioActivityInfo" id="studioActivityInfo" type="button" aria-label="Where to find a GPX, TCX or FIT file, and which has lap splits" title="Activity file help" aria-haspopup="dialog" aria-controls="studioActivityHelpDialog"><span aria-hidden="true">i</span></button>
+  </div>
  </div><span class="studioUploadHint">Files stay in your browser while you edit</span>`;
  previewSurface.appendChild(empty);
  const reminder=document.createElement('div');reminder.id='studioGpxPrompt';reminder.className='studioGpxPrompt';reminder.hidden=true;
@@ -3057,6 +3214,50 @@ setInterval(()=>{if(document.hidden)return;updateGuide();if(drag||pointer)return
   });
   overlayHead.addEventListener('pointercancel',()=>{start=null;overlayPanel.style.removeProperty('--overlay-drag')});
  }
+})();
+</script>
+
+
+<dialog id="studioActivityHelpDialog" aria-labelledby="studioActivityHelpTitle" aria-describedby="studioActivityHelpSummary">
+ <div class="studioActivityHelpHead">
+  <div><h2 id="studioActivityHelpTitle">Where do I get my activity file?</h2><p id="studioActivityHelpSummary">Download the recorded activity from your watch or running app, then upload it here.</p></div>
+  <button type="button" class="studioActivityHelpClose" data-close-activity-help aria-label="Close activity file help">×</button>
+ </div>
+ <div class="studioActivityHelpBody">
+  <h3>Which format should I use?</h3>
+  <div class="studioActivityFormatList">
+   <div class="studioActivityFormat"><strong>FIT</strong><p><b>Best for recorded watch laps and splits.</b> An original activity FIT file often preserves lap boundaries, heart rate and other sensor data.</p></div>
+   <div class="studioActivityFormat"><strong>TCX</strong><p><b>Also good for lap data.</b> TCX activity exports may contain recorded laps and heart-rate readings.</p></div>
+   <div class="studioActivityFormat"><strong>GPX</strong><p><b>Great for the route and timing.</b> Standard GPX exports often lack the watch’s recorded laps, so lap distance/time options may be unavailable.</p></div>
+  </div>
+  <p class="studioActivityTip"><b>Want lap splits?</b> Choose <b>Export Original / FIT</b> first, or <b>TCX</b> if available. Export your <b>recorded run</b>, not a course or planned route. Laps only appear if the file actually contains lap records; the extension alone cannot guarantee them.</p>
+  <h3>Where to export a file</h3>
+  <div class="studioActivitySources">
+   <details><summary>Garmin Connect</summary><p>On Garmin Connect (web), open Activities → All Activities → your run → settings gear. Choose <b>Export Original</b> (usually FIT), <b>Export to TCX</b> or <b>Export to GPX</b>.</p><a href="https://support.garmin.com/en-US/?faq=W1TvTPW8JZ6LfJSfK512Q8" target="_blank" rel="noopener noreferrer">Garmin help ↗</a></details>
+   <details><summary>COROS</summary><p>Open the recorded workout in the COROS app → top-right menu → Export Data. Choose FIT for the best chance of preserving laps if that option is available; otherwise GPX.</p><a href="https://support.coros.com/hc/en-us/articles/4408620041620-Manually-Import-Export-an-Activity-to-3rd-Party-Sites" target="_blank" rel="noopener noreferrer">COROS help ↗</a></details>
+   <details><summary>Strava</summary><p>On Strava’s website, open your own GPS activity → the three-dot menu → Export GPX, or Export Original if available. Original files may preserve more detail than GPX.</p><a href="https://support.strava.com/en-us/articles/15401919-how-do-i-export-my-strava-data" target="_blank" rel="noopener noreferrer">Strava help ↗</a></details>
+   <details><summary>Polar Flow or Suunto</summary><p>In Polar Flow on the web, open your Diary → recorded session → Export and select an available activity format. In the Suunto app, open the saved workout → menu → export workout.</p><a href="https://support.polar.com/uk-en/export-training-sessions-flow" target="_blank" rel="noopener noreferrer">Polar help ↗</a> · <a href="https://www.suunto.com/Support/faq-articles/suunto-app/what-type-of-files-can-i-export-from-the-suunto-app/" target="_blank" rel="noopener noreferrer">Suunto help ↗</a></details>
+  </div>
+  <p style="font-size:12px">If your file lacks recorded laps, you can still use the GPS route and any metrics present in that file. Available data depends on the watch, the app and the export format.</p>
+ </div>
+ <div class="studioActivityHelpFooter"><button type="button" class="studioActivityHelpDone" data-close-activity-help>Got it</button></div>
+</dialog>
+<script id="studioActivityHelpWiring">
+(()=>{
+ const dialog=document.getElementById('studioActivityHelpDialog');
+ if(!dialog)return;
+ let launcher=null;
+ const open=(event)=>{
+  launcher=event?.currentTarget||null;
+  if(!dialog.open)dialog.showModal();
+ };
+ for(const id of ['studioActivityInfo','studioActivityInfoFromMedia']){
+  const btn=document.getElementById(id);if(btn)btn.addEventListener('click',open);
+ }
+ const close=()=>{if(dialog.open)dialog.close();};
+ dialog.querySelectorAll('[data-close-activity-help]').forEach(b=>b.addEventListener('click',close));
+ dialog.addEventListener('click',e=>{if(e.target===dialog)close();});
+ dialog.addEventListener('close',()=>{if(launcher?.isConnected)launcher.focus({preventScroll:true});});
 })();
 </script>
 

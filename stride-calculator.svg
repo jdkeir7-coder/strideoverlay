@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 64 64" role="img" aria-label="Stride Calculator logo">
+<rect fill="#004225" height="64" rx="12" width="64">
+</rect>
+<rect fill="#92ff5f" height="46" rx="5" width="30" x="17" y="9">
+</rect>
+<rect fill="#004225" height="11" rx="1.5" width="20" x="22" y="15">
+</rect>
+<g fill="#004225">
+<rect height="6" rx="1.3" width="6" x="21" y="30">
+</rect>
+<rect height="6" rx="1.3" width="6" x="29" y="30">
+</rect>
+<rect height="6" rx="1.3" width="6" x="37" y="30">
+</rect>
+<rect height="6" rx="1.3" width="6" x="21" y="38">
+</rect>
+<rect height="6" rx="1.3" width="6" x="29" y="38">
+</rect>
+<rect height="6" rx="1.3" width="6" x="37" y="38">
+</rect>
+<rect height="6" rx="1.3" width="6" x="21" y="46">
+</rect>
+<rect height="6" rx="1.3" width="6" x="29" y="46">
+</rect>
+<rect height="6" rx="1.3" width="6" x="37" y="46">
+</rect>
+</g>
+</svg>
