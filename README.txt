@@ -1,25 +1,17 @@
-STRIDE OVERLAY — VERSION 43 (SEO HOMEPAGE FIX)
+STRIDE OVERLAY — VERSION 44 (AUDIO PRESERVATION)
 
-Deploy ALL files and folders in this ZIP into the directory GitHub Pages publishes. Do NOT upload the ZIP itself without extracting it.
+INSTALLATION
+Extract all files into the publishing directory of your GitHub Pages repo.
+index.html is the actual homepage at https://strideoverlay.com/; stride-overlay.html is a matching named copy.
 
-What changed:
-- index.html now contains the real Stride Overlay app rather than redirecting to stride-overlay.html.
-- stride-overlay.html retains the complete application with the same code for convenient editing.
-- Both HTML pages point search engines to https://strideoverlay.com/ as the preferred canonical URL.
-- sitemap.xml advertises only https://strideoverlay.com/ as the preferred page.
-- robots.txt allows crawlers and points to the sitemap.
-- The search title, description, and social sharing metadata have been made more explicit.
-- Existing advertising and app functionality preserved from version 42.
+MOBILE AUDIO EXPORT
+Original AAC audio packets from supported MOV/MP4 source clips now pass directly into the exported MP4, retaining the camera's original encoded sound without re-encoding on mobile Safari. This supports trims, splits and rearranged clips. Silent clips are padded with audio silence to keep timing aligned.
+For non-AAC or unsupported source formats the existing browser audio-processing fallback is used, and errors must not be silently ignored.
 
-IMPORTANT: If editing the app in future, update BOTH index.html and stride-overlay.html or automate copying the source to index.html during deployment. Otherwise the root home page will show outdated code.
+TEST
+1. Upload an iPhone or DJI recording with sound and the corresponding GPX.
+2. Export a 5-second video at 1080p and 30 fps.
+3. Listen in the iPhone Files app and in Photos after saving from Share.
+4. Test a two-clip montage and check sound after each cut.
 
-After deployment:
-1. Visit https://strideoverlay.com/ and confirm it stays at the root URL.
-2. Verify https://strideoverlay.com/sitemap.xml and /robots.txt load.
-3. Sign into Google Search Console: https://search.google.com/search-console/
-4. Verify strideoverlay.com domain ownership (DNS verification may be required).
-5. Inspect https://strideoverlay.com/ and choose Request indexing.
-6. Under Sitemaps, submit https://strideoverlay.com/sitemap.xml.
-7. Monitor indexing and Performance > Search results, filtering for the query Stride Overlay.
-
-No SEO change guarantees position #1. External links, trusted mentions, quality and time also matter.
+Do not treat a browser test as proof of native iPhone compatibility. If the sound is missing, retain the original video and report the model, iOS version and original recording format.

@@ -1372,7 +1372,7 @@ function mp4AudioTrackPresent(arrayBuffer){
 // metadata and remux AAC packets into an *audio-only* M4A for Safari/Chrome.
 // Only small metadata and one audio chunk are read at a time, avoiding the cost of
 // loading 4K footage into memory a second time during export.
-async function readCameraAudio(file,signal){
+async function readCameraAudio(file,signal,metadataOnly=false){
  const cancelled=()=>{if(signal?.aborted)throw new DOMException('Export stopped','AbortError')};
  let pos=0,moov=null;
  while(pos+8<=file.size){
@@ -1434,8 +1434,12 @@ async function readCameraAudio(file,signal){
   if(scCount>100000||tsCount>100000||!scCount||!tsCount||stsc.data+8+scCount*12>stsc.end||stts.data+8+tsCount*8>stts.end)continue;
   const sc=Array.from({length:scCount},(_,i)=>{const p=stsc.data+8+i*12;return {first:u32(p),count:u32(p+4)}});
   const ts=Array.from({length:tsCount},(_,i)=>{const p=stts.data+8+i*8;return {count:u32(p),delta:u32(p+4)}});
-  const target=new Mp4Muxer.ArrayBufferTarget();
-  const muxer=new Mp4Muxer.Muxer({target,audio:{codec:'aac',numberOfChannels:channels,sampleRate},fastStart:'in-memory',firstTimestampBehavior:'offset'});
+  const target=metadataOnly?null:new Mp4Muxer.ArrayBufferTarget();
+  const muxer=metadataOnly?null:new Mp4Muxer.Muxer({target,audio:{codec:'aac',numberOfChannels:channels,sampleRate},fastStart:'in-memory',firstTimestampBehavior:'offset'});
+  const packets=[];
+  const frequencyIndex=validRates.indexOf(sampleRate);
+  const codecConfig=new Uint8Array([((2<<3)|(frequencyIndex>>1))&255,(((frequencyIndex&1)<<7)|(channels<<3))&255]);
+  const packetMetadata={decoderConfig:{codec:'mp4a.40.2',sampleRate,numberOfChannels:channels,description:codecConfig}};
   let sample=0,scIndex=0,tsIndex=0,remaining=ts[0].count,time=0;
   for(let ci=0;ci<chunkCount&&sample<sampleCount;ci++){
    cancelled();while(scIndex<sc.length-1&&ci+1>=sc[scIndex+1].first)scIndex++;
@@ -1443,22 +1447,99 @@ async function readCameraAudio(file,signal){
    if(!count)continue;
    let length=0;for(let j=0;j<count;j++)length+=uniformSize||sizes[sample+j];
    const start=chunkOffsets[ci];if(start<0||length<1||start+length>file.size)throw Error('Could not read complete camera audio from this MOV.');
-   const data=new Uint8Array(await file.slice(start,start+length).arrayBuffer());let cursor=0;
+   const data=metadataOnly?null:new Uint8Array(await file.slice(start,start+length).arrayBuffer());let cursor=0;
    for(let j=0;j<count;j++,sample++){
     const size=uniformSize||sizes[sample];
     while(remaining===0&&tsIndex<ts.length-1){tsIndex++;remaining=ts[tsIndex].count}
     const delta=ts[tsIndex].delta;remaining--;
-    muxer.addAudioChunkRaw(data.subarray(cursor,cursor+size),'key',Math.round(time/timescale*1e6),Math.round(delta/timescale*1e6));
+    packets.push({offset:start+cursor,size,time:time/timescale,duration:delta/timescale});
+    if(muxer)muxer.addAudioChunkRaw(data.subarray(cursor,cursor+size),'key',Math.round(time/timescale*1e6),Math.round(delta/timescale*1e6),packetMetadata);
     cursor+=size;time+=delta;
    }
   }
   if(sample!==sampleCount)throw Error('The camera recording has incomplete audio timestamps.');
-  muxer.finalize();
-  return {hasAudio:true,audioOnly:target.buffer};
+  if(muxer)muxer.finalize();
+  return {hasAudio:true,audioOnly:target?.buffer||null,sampleRate,channels,packets,codecConfig};
  }
  return {hasAudio}; // A track is present, but it is not a supported AAC track.
 }
 
+// Keep original AAC packets, with no iOS Web Audio decoding or AAC re-encoding.
+// This is preferable to relying on a decoded audio buffer that Safari may return
+// as silence even though it still creates a formally valid MP4 audio track.
+const AAC_SILENCE={
+ '44100:1':'ARggBw==','44100:2':'IRAEYIwc',
+ '48000:1':'ARggBw==','48000:2':'IRAEYIwc',
+ '32000:1':'ARggBw==','32000:2':'IRAEYIwc'
+};
+async function originalAacPlan(clips,sources,signal,fps){
+ const tracks=new Map();let format=null,hasAudio=false;
+ for(const i of [...new Set(clips.map(c=>c.sourceIndex))]){
+  if(signal.aborted)throw new DOMException('Export stopped','AbortError');
+  const f=sources[i]?.file;if(!f)throw Error('A source clip is missing. Please upload it again.');
+  let track;
+  try{track=await readCameraAudio(f,signal,true)}catch(error){
+   if(signal.aborted)throw error;
+   console.warn('Original AAC passthrough unavailable',f.name,error);return null;
+  }
+  tracks.set(i,{file:f,...track});
+  if(track.hasAudio){
+   if(!track.packets?.length||!AAC_SILENCE[track.sampleRate+':'+track.channels])return null;
+   if(format&&(format.sampleRate!==track.sampleRate||format.channels!==track.channels))return null;
+   format={sampleRate:track.sampleRate,channels:track.channels,codecConfig:track.codecConfig};hasAudio=true;
+  }else if(track.unsupported)return null;
+ }
+ if(!hasAudio)return{hasAudio:false,mode:'original-aac',sections:[],totalSamples:0};
+ let frameCursor=0;
+ const sections=clips.map(clip=>{
+  const start=frameCursor/fps;
+  frameCursor+=Math.max(1,Math.round((clip.end-clip.start)*fps));
+  return{clip,source:tracks.get(clip.sourceIndex),start,end:frameCursor/fps};
+ });
+ return{hasAudio:true,mode:'original-aac',format,sections,duration:frameCursor/fps};
+}
+async function muxOriginalAac(plan,muxer,signal){
+ const {format}=plan,rate=format.sampleRate,channels=format.channels,frameTime=1024/rate;
+ const binary=atob(AAC_SILENCE[rate+':'+channels]);
+ const quiet=new Uint8Array([...binary].map(x=>x.charCodeAt(0)));
+ const decoderConfig={decoderConfig:{codec:'mp4a.40.2',sampleRate:rate,numberOfChannels:channels,description:format.codecConfig}};
+ let cursor=0,chunks=0,active=true;
+ function append(data,target,duration=frameTime){
+  const timestamp=Math.round(Math.max(cursor,target)*1e6);
+  muxer.addAudioChunkRaw(data,'key',timestamp,Math.round(duration*1e6),active?decoderConfig:undefined);
+  active=false;cursor=timestamp/1e6+duration;chunks++;
+ }
+ function silenceUntil(t){
+  // Fill genuine silent video sections with AAC silence instead of allowing
+  // an edit gap to shift subsequent sound to the start of the movie.
+  while(cursor+frameTime*.55<t){
+   if(signal.aborted)throw new DOMException('Export stopped','AbortError');
+   append(quiet,cursor);
+  }
+ }
+ for(const section of plan.sections){
+  const {clip,source,start,end}=section;
+  silenceUntil(start);
+  if(!source.hasAudio){silenceUntil(end);continue}
+  const all=source.packets;
+  // A complete AAC access unit is around 21ms; pick each packet at its centre.
+  // The clip's timestamp is still the source timeline, even when split or reordered.
+  for(const packet of all){
+   if(signal.aborted)throw new DOMException('Export stopped','AbortError');
+   if(packet.time+packet.duration*.5<clip.start||packet.time+packet.duration*.5>=clip.end)continue;
+   const dest=start+Math.max(0,packet.time-clip.start);
+   if(dest>=end)break;
+   silenceUntil(dest);
+   const bytes=new Uint8Array(await source.file.slice(packet.offset,packet.offset+packet.size).arrayBuffer());
+   if(bytes.length!==packet.size)throw Error('The source AAC sound could not be read completely.');
+   append(bytes,dest,packet.duration);
+  }
+  silenceUntil(end);
+ }
+ silenceUntil(plan.duration);
+ if(chunks===0)throw Error('Export stopped: original AAC audio packets could not be preserved.');
+ return chunks;
+}
 async function decodeMontageAudio(clips,sources,signal,fps){
  const ctx=new OfflineAudioContext(2,1,AUDIO_RATE);
  const buffers=new Map();let hasAudio=false;
@@ -1556,13 +1637,14 @@ async function run(options){
  const {canvas,clips,sources,fps,bitrate,signal,render,progress}=options,width=canvas.width,height=canvas.height;
  if(!window.VideoEncoder||!window.VideoFrame)throw Error('Video export needs an updated Safari, Chrome or Edge.');
  if(!window.Mp4Muxer)throw Error('The video exporter did not load. Refresh the page and try again.');
- const audioPlan=await decodeMontageAudio(clips,sources,signal,fps);
- if(audioPlan.hasAudio){
+ const directPlan=await originalAacPlan(clips,sources,signal,fps);
+ const audioPlan=directPlan||await decodeMontageAudio(clips,sources,signal,fps);
+ if(audioPlan.hasAudio&&audioPlan.mode!=='original-aac'){
   if(!window.AudioEncoder||!window.AudioData)throw Error('Your browser cannot export MP4 files with sound. No muted export was created. Please use an updated Chrome, Edge or Safari.');
   const check=await AudioEncoder.isConfigSupported({codec:'mp4a.40.2',sampleRate:AUDIO_RATE,numberOfChannels:2,bitrate:128000});
   if(!check.supported)throw Error('This browser cannot encode AAC audio. Please use a browser with AAC WebCodecs audio encoding; the original sound has not been discarded.');
  }
- const codec=await pickCodec(width,height,fps,bitrate),target=new Mp4Muxer.ArrayBufferTarget(),muxer=new Mp4Muxer.Muxer({target,video:{codec:'avc',width,height,frameRate:fps},...(audioPlan.hasAudio?{audio:{codec:'aac',numberOfChannels:2,sampleRate:AUDIO_RATE}}:{}),firstTimestampBehavior:'offset',fastStart:'in-memory'});
+ const codec=await pickCodec(width,height,fps,bitrate),target=new Mp4Muxer.ArrayBufferTarget(),muxer=new Mp4Muxer.Muxer({target,video:{codec:'avc',width,height,frameRate:fps},...(audioPlan.hasAudio?{audio:{codec:'aac',numberOfChannels:audioPlan.mode==='original-aac'?audioPlan.format.channels:2,sampleRate:audioPlan.mode==='original-aac'?audioPlan.format.sampleRate:AUDIO_RATE}}:{}),firstTimestampBehavior:'offset',fastStart:'in-memory'});
  let encoderError=null;const encoder=new VideoEncoder({output:(chunk,meta)=>{try{muxer.addVideoChunk(chunk,meta)}catch(e){encoderError=e}},error:e=>{encoderError=e}});
  encoder.configure({codec,width,height,bitrate,framerate:fps,latencyMode:'quality',avc:{format:'avc'}});
  const counts=clips.map(c=>Math.max(1,Math.round((c.end-c.start)*fps))),total=counts.reduce((a,b)=>a+b,0),videos=new Map(),frameDuration=Math.round(1e6/fps);
@@ -1589,14 +1671,14 @@ async function run(options){
   // Write the source audio in montage order, using the same precise trim boundaries.
   // Every section has its own samples, so split/reordered clips cannot borrow
   // sound from their neighbour. Silent sections are padded with silence.
-  const audioChunks=await encodeMontageAudio(audioPlan,muxer,signal);
+  const audioChunks=audioPlan.mode==='original-aac'?(audioPlan.hasAudio?await muxOriginalAac(audioPlan,muxer,signal):0):await encodeMontageAudio(audioPlan,muxer,signal);
   if(signal.aborted)throw new DOMException('Export stopped','AbortError');
   muxer.finalize();
   if(audioPlan.hasAudio&&(!(audioChunks>0)||mp4AudioTrackPresent(target.buffer)!==true)){
    throw Error('The finished MP4 is missing its audio track. Export stopped to prevent a silent download.');
   }
   progress(1,total,total);
-  return{blob:new Blob([target.buffer],{type:'video/mp4'}),type:'video/mp4',extension:'mp4',audioIncluded:audioPlan.hasAudio,audioChunks:audioChunks||0,dispose:done.dispose};
+  return{blob:new Blob([target.buffer],{type:'video/mp4'}),type:'video/mp4',extension:'mp4',audioIncluded:audioPlan.hasAudio,audioChunks:audioChunks||0,audioMethod:audioPlan.hasAudio?(audioPlan.mode==='original-aac'?'Original AAC preserved':'Audio re-encoded'):'No audio source',dispose:done.dispose};
  }finally{
   try{if(encoder.state!=='closed')encoder.close()}catch{}
   for(const v of videos.values()){v.removeAttribute('src');v.load();v.remove()}
@@ -2026,7 +2108,7 @@ async function exportClip(){
   const previousCleanup=exportFileCleanup;exportedFile=new File([result.blob],filename,{type:result.type});exportFileCleanup=result.dispose;await previousCleanup?.();
   showExportSaveChoices();
   $('audioExportStatus').hidden=false;
-  $('audioExportStatus').textContent=result.audioIncluded?'✓ Audio track included in exported MP4.':'No audio track detected in the source video clips.';
+  $('audioExportStatus').textContent=result.audioIncluded?'✓ Original sound retained ('+result.audioMethod+').':'No audio track found in your uploaded clips.';
   say('Your '+fmtCut(total)+' montage is ready as an MP4. Choose where to save it below.');
  }catch(error){if(hadSavedVideo)showExportSaveChoices();say(controller.signal.aborted?'Export stopped. You can edit and export again.':error.message||'Export failed. Try standard quality or an updated browser.',!controller.signal.aborted)}
  finally{
