@@ -13,6 +13,25 @@
     </script>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <!-- Start hidden before first paint, while the studio replaces the legacy layout. -->
+    <script id="stride-boot-start">document.documentElement.classList.add('stride-boot-pending');</script>
+    <style id="stride-boot-style">
+      html.stride-boot-pending, html.stride-boot-pending body {background:#f1f5f6!important}
+      #strideBootScreen{display:none}
+      html.stride-boot-pending body > :not(#strideBootScreen){visibility:hidden!important}
+      html.stride-boot-pending #strideBootScreen{
+        display:flex;position:fixed;inset:0;z-index:2147483647;
+        flex-direction:column;align-items:center;justify-content:center;
+        gap:12px;background:#f1f5f6;color:#004225;
+        font:800 16px Manrope,Arial,sans-serif;letter-spacing:-.025em
+      }
+      #strideBootScreen img{width:56px;height:56px;border-radius:12px}
+      #strideBootScreen small{font-size:12px;font-weight:500;color:#5a7564}
+      html.stride-boot-pending .layout>.panel,
+      html.stride-boot-pending .studioExportDrawer{
+        transition:none!important;animation:none!important
+      }
+    </style>
     <title>Stride Overlay | Free GPS Running Video Editor</title>
     <meta name="description" content="Stride Overlay turns running videos into shareable highlights. Add GPS maps, pace, heart rate and lap splits from GPX, FIT or TCX files, then edit and export." />
     <link rel="canonical" href="https://strideoverlay.com/" />
@@ -678,6 +697,11 @@ body[data-editor-step="3"] .stage .syncHelp {color:#004225!important;}
 </style>
 </head>
   <body>
+    <div id="strideBootScreen" role="status" aria-label="Preparing Stride Overlay editor">
+      <img src="/favicon.svg" alt="" aria-hidden="true" width="56" height="56" />
+      <span>STRIDE OVERLAY</span>
+      <small>Preparing editor…</small>
+    </div>
     <header>
       <div class="brand">
         <img class="brandMark" src="data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2064%2064%22%20role=%22img%22%20aria-label=%22Stride%20Overlay%20squiggle%22%3E%3Crect%20width=%2264%22%20height=%2264%22%20rx=%2212%22%20fill=%22%23004225%22/%3E%3Cpath%20d=%22M8%2043h12l8-22%209%2029%208-18h11%22%20fill=%22none%22%20stroke=%22%2392ff5f%22%20stroke-width=%227%22%20stroke-linejoin=%22round%22%20stroke-linecap=%22round%22/%3E%3C/svg%3E" alt="" aria-hidden="true" />
@@ -3480,6 +3504,10 @@ setInterval(()=>{if(document.hidden)return;updateGuide();if(drag||pointer)return
  dialog.addEventListener('click',e=>{if(e.target===dialog)close();});
  dialog.addEventListener('close',()=>{if(launcher?.isConnected)launcher.focus({preventScroll:true});});
 })();
+</script>
+<script id="stride-boot-ready">
+  /* Reveal only after all editor layout scripts and styling are in place. */
+  requestAnimationFrame(() => document.documentElement.classList.remove('stride-boot-pending'));
 </script>
 
 </body>
