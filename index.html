@@ -1715,7 +1715,7 @@ window.StrideFrameExport={run};
 </script>
 <script>
       const $=id=>document.getElementById(id),video=$('source'),canvas=$('canvas'),ctx=canvas.getContext('2d',{alpha:false});let W=1080,H=1920;
-let sourceClips=[],selectedClip=0,exportClipIndex=null,montagePlaying=false,pendingSourceFrame=null;let dropdowns=[];let points=[],routePath=[],routeBounds=null,videoURL=null,recording=false,raf=0,abort=false,exportedFile=null,trimStart=0,trimEnd=0,slices=[],activeSlice=0,transitionFrame=null,transitionStarted=0,transitionStyle='smooth',transitionDemoStop=null,gpxUploadToken=0,gpxLoading=false,videoPanX=0,videoPanY=0,overlayPanX=0,overlayPanY=.82,layoutMode="video",overlayBounds=null,overlaySelected=false,overlayWidthFactor=1,overlayHeightFactor=1,overlayRenderScale=1,videoMoveRange={x:0,y:0};
+let activityUtcOffsetMinutes=null;let sourceClips=[],selectedClip=0,exportClipIndex=null,montagePlaying=false,pendingSourceFrame=null;let dropdowns=[];let points=[],routePath=[],routeBounds=null,videoURL=null,recording=false,raf=0,abort=false,exportedFile=null,trimStart=0,trimEnd=0,slices=[],activeSlice=0,transitionFrame=null,transitionStarted=0,transitionStyle='smooth',transitionDemoStop=null,gpxUploadToken=0,gpxLoading=false,videoPanX=0,videoPanY=0,overlayPanX=0,overlayPanY=.82,layoutMode="video",overlayBounds=null,overlaySelected=false,overlayWidthFactor=1,overlayHeightFactor=1,overlayRenderScale=1,videoMoveRange={x:0,y:0};
 async function smartSyncReadBox(file,at,end){
   if(at<0||at+8>end)return null;
   const bytes=new Uint8Array(await file.slice(at,Math.min(at+16,end)).arrayBuffer());
@@ -1781,73 +1781,150 @@ async function smartSyncAppleDate(file,moov,moovChildren){
   }
   return null;
 }
-async function smartSyncReadCaptureTime(file){
-  if(!file||!/\.(mp4|mov|m4v)$/i.test(file.name||''))return null;
-  const top=await smartSyncListBoxes(file,0,file.size,256);
-  const moov=top.find(box=>box.name==='moov');
-  if(!moov)return null;
-  const inner=await smartSyncListBoxes(file,moov.dataStart,moov.end,256);
-  // Apple's offset-aware recording date is preferable to the MP4 container's creation date.
-  const apple=await smartSyncAppleDate(file,moov,inner);
-  if(apple!==null)return apple;
-  const mvhd=inner.find(box=>box.name==='mvhd');
-  if(!mvhd)return null;
-  const data=new Uint8Array(await file.slice(mvhd.dataStart,Math.min(mvhd.end,mvhd.dataStart+24)).arrayBuffer());
-  if(data.length<8)return null;
-  const v=new DataView(data.buffer,data.byteOffset,data.byteLength);
-  const created=data[0]===1?(data.length>=12?Number(v.getBigUint64(4,false)):NaN):v.getUint32(4,false);
-  // ISO BMFF/QuickTime creation_time counts seconds since 1904-01-01 UTC.
-  const epoch=(created-2082844800)*1000;
+
+function smartSyncMovieDate(file,box){
+ if(!box)return Promise.resolve(null);
+ return file.slice(box.dataStart,Math.min(box.end,box.dataStart+24)).arrayBuffer().then(buf=>{
+  const v=new DataView(buf);if(v.byteLength<8)return null;
+  const seconds=v.getUint8(0)===1?(v.byteLength>=12?Number(v.getBigUint64(4,false)):NaN):v.getUint32(4,false);
+  const epoch=(seconds-2082844800)*1000;
   return Number.isFinite(epoch)&&epoch>=946684800000&&epoch<=Date.now()+86400000?epoch:null;
+ });
+}
+async function smartSyncReadLegacyDate(file,moov,children){
+ // Classic QuickTime files may store a creation date in udta/©day or metadata/ilst/©day.
+ const udta=children.find(b=>b.name==='udta');if(!udta)return [];
+ const found=[],items=await smartSyncListBoxes(file,udta.dataStart,udta.end,192);
+ const groups=[items];
+ for(const meta of items.filter(b=>b.name==='meta')){
+  const elements=await smartSyncListBoxes(file,meta.dataStart+4,meta.end,192);
+  groups.push(elements);
+  for(const ilst of elements.filter(b=>b.name==='ilst'))groups.push(await smartSyncListBoxes(file,ilst.dataStart,ilst.end,256));
+ }
+ for(const group of groups)for(const b of group){
+  if(!['©day','day '].includes(b.name))continue;
+  let start=b.dataStart;
+  const inside=await smartSyncListBoxes(file,b.dataStart,b.end,10);
+  const data=inside.find(box=>box.name==='data');
+  if(data)start=data.dataStart+8;
+  const bytes=new Uint8Array(await file.slice(start,Math.min(b.end,start+512)).arrayBuffer());
+  const text=new TextDecoder().decode(bytes);
+  const parsed=smartSyncParseZonedDate(text);
+  if(parsed!==null)found.push({time:parsed,source:'QuickTime date',priority:105});
+ }
+ return found;
+}
+function smartSyncFileNameClock(name){
+ const text=String(name||'');
+ // Filenames from cameras such as DJI_20261002184432_0094_D.MOV or VID_20261002_184432.MP4.
+ const match=text.match(/(?:^|[_ -])(?:DJI[_ -]?|VID[_ -]?|PXL[_ -]?|MOV[_ -]?)?(20\d{6})[_ -]?(\d{6})(?=[_. -]|$)/i);
+ if(!match)return null;
+ const d=match[1],t=match[2],year=Number(d.slice(0,4)),month=Number(d.slice(4,6)),day=Number(d.slice(6,8)),hour=Number(t.slice(0,2)),minute=Number(t.slice(2,4)),second=Number(t.slice(4,6));
+ if(month<1||month>12||day<1||day>31||hour>23||minute>59||second>59)return null;
+ const verify=new Date(Date.UTC(year,month-1,day,hour,minute,second));
+ if(verify.getUTCFullYear()!==year||verify.getUTCMonth()+1!==month||verify.getUTCDate()!==day)return null;
+ return {year,month,day,hour,minute,second};
+}
+async function smartSyncReadCaptureCandidates(file){
+ const results=[],add=(time,source,priority)=>{
+  if(Number.isFinite(time)&&time>=946684800000&&time<=Date.now()+86400000&&!results.some(x=>x.time===time&&x.source===source))results.push({time,source,priority});
+ };
+ const name=String(file?.name||'');
+ const clock=smartSyncFileNameClock(name);
+ if(clock)results.push({clock,source:'camera filename',priority:85});
+ if(!file||!/\.(mp4|mov|m4v)$/i.test(name))return results;
+ try{
+  const top=await smartSyncListBoxes(file,0,file.size,512),moov=top.find(box=>box.name==='moov');
+  if(!moov)return results;
+  const inner=await smartSyncListBoxes(file,moov.dataStart,moov.end,512);
+  try{add(await smartSyncAppleDate(file,moov,inner),'iPhone recording date',120)}catch{}
+  try{for(const date of await smartSyncReadLegacyDate(file,moov,inner))add(date.time,date.source,date.priority)}catch{}
+  try{add(await smartSyncMovieDate(file,inner.find(b=>b.name==='mvhd')),'video header',75)}catch{}
+  // Some MOV/MP4 producers omit mvhd creation time but preserve per-track dates.
+  for(const trak of inner.filter(b=>b.name==='trak').slice(0,6)){
+   try{
+    const parts=await smartSyncListBoxes(file,trak.dataStart,trak.end,96);
+    add(await smartSyncMovieDate(file,parts.find(b=>b.name==='tkhd')),'track header',65);
+    const mdia=parts.find(b=>b.name==='mdia');
+    if(mdia){const children=await smartSyncListBoxes(file,mdia.dataStart,mdia.end,96);add(await smartSyncMovieDate(file,children.find(b=>b.name==='mdhd')),'media header',60);}
+   }catch{}
+  }
+ }catch{}
+ return results;
+}
+function smartSyncCompareTimes(candidates){
+ const first=points[0]?.time,last=points.at(-1)?.time;
+ if(!Number.isFinite(first)||!Number.isFinite(last)||last<first)return {matched:false,reason:'no-activity'};
+ if(!candidates?.length)return {matched:false,reason:'no-timestamp'};
+ const possible=[];
+ const add=(time,source,priority)=>{
+  if(!Number.isFinite(time))return;
+  if(time>=first&&time<=last)possible.push({time,source,priority});
+ };
+ for(const cand of candidates){
+  if(cand.clock){
+   const {year,month,day,hour,minute,second}=cand.clock;
+   const utc=Date.UTC(year,month-1,day,hour,minute,second);
+   // FIT can carry the workout's local UTC offset, making camera wall-clock filenames precise.
+   if(Number.isFinite(activityUtcOffsetMinutes))add(utc-activityUtcOffsetMinutes*60000,'camera filename + FIT time zone',110);
+   const local=new Date(year,month-1,day,hour,minute,second).getTime();
+   add(local,'camera filename (device time zone)',90);
+   add(utc,'camera filename (UTC)',55);
+  } else {
+   add(cand.time,cand.source,cand.priority);
+   // A few camera makers store local clock time in the UTC movie header.
+   // Only apply the watch's explicit timezone for this secondary, lower-confidence option.
+   if(Number.isFinite(activityUtcOffsetMinutes)&&activityUtcOffsetMinutes!==0&&/header/.test(cand.source)){
+    add(cand.time-activityUtcOffsetMinutes*60000,'video header + FIT time zone',48);
+   }
+  }
+ }
+ if(!possible.length)return {matched:false,reason:'outside-activity'};
+ possible.sort((a,b)=>b.priority-a.priority);
+ const best=possible[0];
+ return {matched:true,seconds:Math.round((best.time-first)/100)/10,source:best.source,time:best.time};
 }
 function smartSyncUpdateHint(){
-  const control=$('offset');if(!control)return;
-  let hint=$('smartSyncHint');
-  if(!hint){
-    hint=document.createElement('div');hint.id='smartSyncHint';hint.setAttribute('role','status');
-    hint.setAttribute('aria-live','polite');hint.className='smartSyncHint';
-    control.insertAdjacentElement('afterend',hint);
-  }
-  const clip=sourceClips[selectedClip];
-  hint.hidden=!clip||!points.length;
-  if(hint.hidden)return;
-  hint.textContent=clip.smartSyncManual?'Manual timing · your adjustment is saved for this clip':clip.smartSyncMatched?'Smart Sync · matched video recording time · adjust if needed':'Starts at 0:00 · drag the slider if needed';
+ const control=$('offset');if(!control)return;
+ let hint=$('smartSyncHint');
+ if(!hint){
+  hint=document.createElement('div');hint.id='smartSyncHint';hint.setAttribute('role','status');
+  hint.setAttribute('aria-live','polite');hint.className='smartSyncHint';
+  control.insertAdjacentElement('afterend',hint);
+ }
+ const clip=sourceClips[selectedClip];hint.hidden=!clip||!points.length;
+ if(hint.hidden)return;
+ if(clip.smartSyncManual)hint.textContent='Manual timing · your adjustment stays saved for this clip';
+ else if(clip.smartSyncPending)hint.textContent='Smart Sync · checking recording time…';
+ else if(clip.smartSyncMatched)hint.textContent='Smart Sync · matched using '+(clip.smartSyncSource||'recording time')+' · adjust if needed';
+ else if(clip.smartSyncReason==='outside-activity')hint.textContent='Recording time does not match this activity · starts at 0:00';
+ else if(clip.smartSyncReason==='no-timestamp')hint.textContent='No recording timestamp found · starts at 0:00';
+ else hint.textContent='Starts at 0:00 · adjust the slider if needed';
 }
 function smartSyncApply(clip){
-  if(!clip||!sourceClips.includes(clip)||clip.smartSyncManual||recording)return;
-  let seconds=0,matched=false;
-  if(points.length>1&&Number.isFinite(clip.smartSyncCaptureTime)){
-    const first=points[0].time,last=points[points.length-1].time;
-    const capture=clip.smartSyncCaptureTime;
-    if(Number.isFinite(first)&&Number.isFinite(last)&&capture>=first&&capture<=last){
-      seconds=Math.round((capture-first)/100)/10;
-      const max=last-first;
-      seconds=Math.min(max/1000,Math.max(0,seconds));
-      matched=true;
-    }
-  }
-  clip.offset=seconds;clip.smartSyncMatched=matched;
-  if(sourceClips[selectedClip]===clip){
-    $('offset').value=String(seconds);
-    syncOffsetTime();
-  }else smartSyncUpdateHint();
+ if(!clip||!sourceClips.includes(clip)||clip.smartSyncManual||recording)return;
+ const found=smartSyncCompareTimes(clip.smartSyncCandidates);
+ const seconds=found.matched?found.seconds:0;
+ clip.offset=seconds;clip.smartSyncMatched=!!found.matched;
+ clip.smartSyncSource=found.source||null;clip.smartSyncReason=found.reason||null;
+ if(sourceClips[selectedClip]===clip){$('offset').value=String(seconds);syncOffsetTime();}
+ else smartSyncUpdateHint();
 }
 function smartSyncReadClip(clip){
-  if(!clip||clip.smartSyncReadStarted)return;
-  clip.smartSyncReadStarted=true;clip.smartSyncCaptureTime=null;
-  // Metadata is inspected locally and asynchronously. Videos never leave the browser.
-  smartSyncReadCaptureTime(clip.file).then(timestamp=>{
-    if(!sourceClips.includes(clip))return;
-    clip.smartSyncCaptureTime=timestamp;
-    smartSyncApply(clip);
-  }).catch(()=>{if(sourceClips.includes(clip)){clip.smartSyncCaptureTime=null;smartSyncApply(clip);}});
+ if(!clip||clip.smartSyncReadStarted)return;
+ clip.smartSyncReadStarted=true;clip.smartSyncPending=true;
+ clip.smartSyncCandidates=[];clip.smartSyncReason='checking';smartSyncUpdateHint();
+ smartSyncReadCaptureCandidates(clip.file).then(candidates=>{
+  if(!sourceClips.includes(clip))return;
+  clip.smartSyncPending=false;clip.smartSyncCandidates=candidates;smartSyncApply(clip);
+ }).catch(()=>{
+  if(!sourceClips.includes(clip))return;
+  clip.smartSyncPending=false;clip.smartSyncCandidates=[];smartSyncApply(clip);
+ });
 }
 function smartSyncAllClips(){
-  for(const clip of sourceClips){
-    if(!clip.smartSyncReadStarted)smartSyncReadClip(clip);
-    else smartSyncApply(clip);
-  }
-  smartSyncUpdateHint();
+ for(const clip of sourceClips){if(!clip.smartSyncReadStarted)smartSyncReadClip(clip);else smartSyncApply(clip);}
+ smartSyncUpdateHint();
 }
 const color=()=> '#92ff5f';
 const fmt=s=>{s=Math.max(0,Math.floor(Number(s)||0));return Math.floor(s/60)+':'+String(s%60).padStart(2,'0')};
@@ -1880,7 +1957,7 @@ function preparePace(p){
  }
 }
 function parseTCX(xml){const doc=new DOMParser().parseFromString(xml,'application/xml');if(doc.querySelector('parsererror'))throw Error('This TCX file could not be read.');const all=[...doc.getElementsByTagName('*')],num=v=>v===null||v===undefined||v===''?NaN:Number(v),first=(el,name)=>{for(const n of el.getElementsByTagName('*'))if(n.localName===name)return n.textContent.trim();return null},kid=(el,name)=>[...el.children].find(c=>c.localName===name);const p=all.filter(n=>n.localName==='Trackpoint').map(el=>{const o={time:Date.parse(first(el,'Time')),lat:num(first(el,'LatitudeDegrees')),lon:num(first(el,'LongitudeDegrees'))},ele=num(first(el,'AltitudeMeters')),hrEl=kid(el,'HeartRateBpm'),hr=hrEl?num(first(hrEl,'Value')):NaN,w=num(first(el,'Watts')),sp=num(first(el,'Speed'));let cad=num(first(el,'RunCadence'));if(!Number.isFinite(cad)){const c=kid(el,'Cadence');cad=c?num(c.textContent):NaN}if(Number.isFinite(ele))o.ele=ele;if(Number.isFinite(hr)&&hr>0)o.hr=hr;if(Number.isFinite(cad))o.cad=cad;if(Number.isFinite(w))o.power=w;if(Number.isFinite(sp))o.speed=sp;return o}).filter(n=>Number.isFinite(n.time)&&Number.isFinite(n.lat)&&Number.isFinite(n.lon));if(!p.length)throw Error('This TCX file has no GPS track points. Indoor activities are not supported yet.');const laps=all.filter(n=>n.localName==='Lap').map(l=>{const start=Date.parse(l.getAttribute('StartTime')),time=num(kid(l,'TotalTimeSeconds')?.textContent),dist=num(kid(l,'DistanceMeters')?.textContent),hrEl=kid(l,'AverageHeartRateBpm');return{end:start+time*1000,time,dist,hr:hrEl?num(first(hrEl,'Value')):NaN}}).filter(l=>Number.isFinite(l.end)&&l.time>0);return{points:finishPoints(p),laps}}
-function parseFIT(buf){if(buf.byteLength<14)throw Error('This FIT file could not be read.');const v=new DataView(buf),hs=v.getUint8(0);if(String.fromCharCode(v.getUint8(8),v.getUint8(9),v.getUint8(10),v.getUint8(11))!=='.FIT')throw Error('This FIT file could not be read.');const end=Math.min(buf.byteLength-2,hs+v.getUint32(4,true)),defs={},recs=[],lapMsgs=[],sizes={0:1,1:1,2:1,3:2,4:2,5:4,6:4,7:1,8:4,9:8,10:1,11:2,12:4,13:1,14:8,15:8,16:8};let o=hs,lastTs=0;const rd=(t,le)=>{switch(t){case 0:case 2:case 13:{const x=v.getUint8(o);return x===255?null:x}case 1:{const x=v.getInt8(o);return x===127?null:x}case 3:{const x=v.getInt16(o,le);return x===32767?null:x}case 4:{const x=v.getUint16(o,le);return x===65535?null:x}case 5:{const x=v.getInt32(o,le);return x===2147483647?null:x}case 6:{const x=v.getUint32(o,le);return x===4294967295?null:x}case 8:{const x=v.getFloat32(o,le);return Number.isFinite(x)?x:null}case 9:{const x=v.getFloat64(o,le);return Number.isFinite(x)?x:null}case 10:{const x=v.getUint8(o);return x||null}case 11:{const x=v.getUint16(o,le);return x||null}case 12:{const x=v.getUint32(o,le);return x||null}default:return null}};try{while(o<end){const h=v.getUint8(o++);if(!(h&0x80)&&(h&0x40)){const local=h&15,dev=!!(h&0x20);o++;const le=v.getUint8(o++)===0,global=v.getUint16(o,le);o+=2;const n=v.getUint8(o++),fields=[];for(let i=0;i<n;i++){fields.push({num:v.getUint8(o),size:v.getUint8(o+1),type:v.getUint8(o+2)&31});o+=3}let devSize=0;if(dev){const m=v.getUint8(o++);for(let i=0;i<m;i++){devSize+=v.getUint8(o+1);o+=3}}defs[local]={le,global,fields,devSize};continue}let local,compressed=null;if(h&0x80){local=(h>>5)&3;compressed=h&31}else local=h&15;const d=defs[local];if(!d)break;const msg={};for(const f of d.fields){if(f.type!==7&&f.size>=(sizes[f.type]||1))msg[f.num]=rd(f.type,d.le);o+=f.size}o+=d.devSize;if(compressed!==null){lastTs=(lastTs&~31)+compressed+(compressed<(lastTs&31)?32:0);msg[253]=lastTs}else if(msg[253]!=null)lastTs=msg[253];if(d.global===20)recs.push(msg);else if(d.global===19)lapMsgs.push(msg)}}catch{}const E=631065600,sc=180/2147483648,p=recs.map(m=>{const o={time:m[253]!=null?(m[253]+E)*1000:NaN,lat:m[0]!=null?m[0]*sc:NaN,lon:m[1]!=null?m[1]*sc:NaN},alt=m[78]!=null?m[78]/5-500:m[2]!=null?m[2]/5-500:null,sp=m[73]!=null?m[73]/1000:m[6]!=null?m[6]/1000:null;if(alt!==null)o.ele=alt;if(m[3]>0)o.hr=m[3];if(m[4]!=null)o.cad=m[4]+(m[53]!=null?m[53]/128:0);if(m[7]!=null)o.power=m[7];if(sp!==null)o.speed=sp;return o}).filter(n=>Number.isFinite(n.time)&&Number.isFinite(n.lat)&&Number.isFinite(n.lon));if(!p.length)throw Error('This FIT file has no GPS track. Indoor activities are not supported yet.');const laps=lapMsgs.filter(m=>m[253]!=null).map(m=>({end:(m[253]+E)*1000,time:(m[8]!=null?m[8]:m[7]!=null?m[7]:0)/1000,dist:m[9]!=null?m[9]/100:NaN,hr:m[15]!=null?m[15]:NaN})).filter(l=>l.time>0);return{points:finishPoints(p),laps}}
+function parseFIT(buf){if(buf.byteLength<14)throw Error('This FIT file could not be read.');const v=new DataView(buf),hs=v.getUint8(0);if(String.fromCharCode(v.getUint8(8),v.getUint8(9),v.getUint8(10),v.getUint8(11))!=='.FIT')throw Error('This FIT file could not be read.');const end=Math.min(buf.byteLength-2,hs+v.getUint32(4,true)),defs={},recs=[],lapMsgs=[],sizes={0:1,1:1,2:1,3:2,4:2,5:4,6:4,7:1,8:4,9:8,10:1,11:2,12:4,13:1,14:8,15:8,16:8};let o=hs,lastTs=0,fitTz=null;const rd=(t,le)=>{switch(t){case 0:case 2:case 13:{const x=v.getUint8(o);return x===255?null:x}case 1:{const x=v.getInt8(o);return x===127?null:x}case 3:{const x=v.getInt16(o,le);return x===32767?null:x}case 4:{const x=v.getUint16(o,le);return x===65535?null:x}case 5:{const x=v.getInt32(o,le);return x===2147483647?null:x}case 6:{const x=v.getUint32(o,le);return x===4294967295?null:x}case 8:{const x=v.getFloat32(o,le);return Number.isFinite(x)?x:null}case 9:{const x=v.getFloat64(o,le);return Number.isFinite(x)?x:null}case 10:{const x=v.getUint8(o);return x||null}case 11:{const x=v.getUint16(o,le);return x||null}case 12:{const x=v.getUint32(o,le);return x||null}default:return null}};try{while(o<end){const h=v.getUint8(o++);if(!(h&0x80)&&(h&0x40)){const local=h&15,dev=!!(h&0x20);o++;const le=v.getUint8(o++)===0,global=v.getUint16(o,le);o+=2;const n=v.getUint8(o++),fields=[];for(let i=0;i<n;i++){fields.push({num:v.getUint8(o),size:v.getUint8(o+1),type:v.getUint8(o+2)&31});o+=3}let devSize=0;if(dev){const m=v.getUint8(o++);for(let i=0;i<m;i++){devSize+=v.getUint8(o+1);o+=3}}defs[local]={le,global,fields,devSize};continue}let local,compressed=null;if(h&0x80){local=(h>>5)&3;compressed=h&31}else local=h&15;const d=defs[local];if(!d)break;const msg={};for(const f of d.fields){if(f.type!==7&&f.size>=(sizes[f.type]||1))msg[f.num]=rd(f.type,d.le);o+=f.size}o+=d.devSize;if(compressed!==null){lastTs=(lastTs&~31)+compressed+(compressed<(lastTs&31)?32:0);msg[253]=lastTs}else if(msg[253]!=null)lastTs=msg[253];if(d.global===20)recs.push(msg);else if(d.global===19)lapMsgs.push(msg);else if(d.global===34&&msg[5]!=null&&msg[253]!=null){const minutes=Math.round((msg[5]-msg[253])/60);if(Number.isFinite(minutes)&&Math.abs(minutes)<=14*60)fitTz=minutes}}}catch{}const E=631065600,sc=180/2147483648,p=recs.map(m=>{const o={time:m[253]!=null?(m[253]+E)*1000:NaN,lat:m[0]!=null?m[0]*sc:NaN,lon:m[1]!=null?m[1]*sc:NaN},alt=m[78]!=null?m[78]/5-500:m[2]!=null?m[2]/5-500:null,sp=m[73]!=null?m[73]/1000:m[6]!=null?m[6]/1000:null;if(alt!==null)o.ele=alt;if(m[3]>0)o.hr=m[3];if(m[4]!=null)o.cad=m[4]+(m[53]!=null?m[53]/128:0);if(m[7]!=null)o.power=m[7];if(sp!==null)o.speed=sp;return o}).filter(n=>Number.isFinite(n.time)&&Number.isFinite(n.lat)&&Number.isFinite(n.lon));if(!p.length)throw Error('This FIT file has no GPS track. Indoor activities are not supported yet.');const laps=lapMsgs.filter(m=>m[253]!=null).map(m=>({end:(m[253]+E)*1000,time:(m[8]!=null?m[8]:m[7]!=null?m[7]:0)/1000,dist:m[9]!=null?m[9]/100:NaN,hr:m[15]!=null?m[15]:NaN})).filter(l=>l.time>0);return{points:finishPoints(p),laps,utcOffsetMinutes:fitTz}}
 function parseGPX(xml){const doc=new DOMParser().parseFromString(xml,'application/xml');if(doc.querySelector('parsererror'))throw Error('This GPX file could not be read.');const nodes=[...doc.getElementsByTagName('*')].filter(n=>n.localName==='trkpt'||n.localName==='rtept');let p=nodes.map(n=>({...pointData(n),lat:Number(n.getAttribute('lat')),lon:Number(n.getAttribute('lon'))})).filter(n=>Number.isFinite(n.time)&&Number.isFinite(n.lat)&&Number.isFinite(n.lon));return finishPoints(p)}
 function finishPoints(p){if(p.length<2)throw Error('This file needs at least two track points with timestamps and GPS positions.');p.sort((a,b)=>a.time-b.time);p=p.filter((point,i)=>i===p.length-1||point.time!==p[i+1].time);if(p.length<2)throw Error('GPX needs at least two different timestamps.');let distance=0;for(let i=0;i<p.length;i++){if(i){const a=p[i-1],b=p[i],R=6371000,rad=Math.PI/180,dlat=(b.lat-a.lat)*rad,dlon=(b.lon-a.lon)*rad,h=Math.sin(dlat/2)**2+Math.cos(a.lat*rad)*Math.cos(b.lat*rad)*Math.sin(dlon/2)**2;distance+=2*R*Math.asin(Math.min(1,Math.sqrt(h)))}p[i].dist=distance;p[i].sec=(p[i].time-p[0].time)/1000}
 preparePace(p);
@@ -2084,9 +2161,9 @@ for(const rowId of ['lapDistRow','lapTimeRow']){
  });
 }
 function updateMetricOptions(){const has=key=>points.some(p=>Number.isFinite(p[key])),derived=points.length>1&&points.at(-1).dist>=30&&points.some(p=>Number.isFinite(p.sec)&&p.sec>0),pace=derived&&points.some(p=>{const v=paceAtDistance(p.dist);return Number.isFinite(v)}),available={map:derived,pace,distance:derived,speed:has('speed')||pace,hr:has('hr'),ele:has('ele'),incline:has('ele')&&derived,cad:has('cad'),power:has('power')};available.time=derived;for(const [key,id] of Object.entries({pace:'paceToggle',distance:'distanceToggle',speed:'speedToggle',hr:'hrToggle',ele:'eleToggle',incline:'inclineToggle',cad:'cadToggle',power:'powerToggle',time:'timeToggle'})){const input=$(id),wasOff=input.dataset.off!=='0';if(available[key]&&wasOff&&['pace'].includes(key))input.checked=true;input.dataset.off=available[key]?'0':'1';input.closest('label').hidden=false;input.disabled=false;setMetricState([id],!!available[key],metricNeed(key))}syncLapUi();for(const option of $('chartMetric').options){if(option.value==='none')continue;option.hidden=!available[option.value];option.disabled=!available[option.value]}if($('chartMetric').selectedOptions[0]?.disabled)$('chartMetric').value=['map','pace','ele','hr','cad','power','speed'].find(key=>available[key])||'none';syncMaxHRVisibility();syncDropdowns();return available}
-updateMetricOptions();$('gpxInput').onchange=async e=>{if(recording)return;const f=e.target.files[0];if(!f)return;const token=++gpxUploadToken;gpxLoading=true;$('exportBtn').disabled=true;try{const ext=(f.name.split('.').pop()||'').toLowerCase(),parsed=ext==='fit'?parseFIT(await f.arrayBuffer()):ext==='tcx'?parseTCX(await f.text()):{points:parseGPX(await f.text()),laps:[]};if(token!==gpxUploadToken)return;gpxLoading=false;points=parsed.points;fileLaps=parsed.laps.map(l=>({sec:(l.end-points[0].time)/1000,time:l.time,dist:l.dist,hr:l.hr})).filter(l=>Number.isFinite(l.sec)&&l.sec>0);$('lapMarkers').checked=fileLaps.length>1;$('lapBeep').checked=fileLaps.length>1;prepareRoute();$('gpxName').textContent=f.name;$('gpxInput').closest('.uploadSlot').classList.add('hasFile');$('removeGpx').hidden=false;const available=updateMetricOptions();for(const id of ['hrToggle','cadToggle','eleToggle','inclineToggle','powerToggle','speedToggle','lapDistToggle','lapTimeToggle'])$(id).checked=false;$('paceToggle').checked=!!available.pace;$('distanceToggle').checked=!!available.distance;$('timeToggle').checked=!!available.time;$('chartMetric').value=available.map?'map':['pace','ele','hr','cad','power','speed'].find(key=>available[key])||'none';syncDropdowns();syncMaxHRVisibility();ready();smartSyncAllClips();if(!points.some(p=>Number.isFinite(p.hr)))say('Activity loaded without heart rate. Available metrics are shown below.');if(fileLaps.length>1){syncLapUi();say('Found '+fileLaps.length+' laps in this file. Lap markers are on, and Lap distance and Lap time are now available in the overlay options.')}}catch(err){if(token!==gpxUploadToken)return;gpxLoading=false;points=[];fileLaps=[];routePath=[];routeBounds=null;$('gpxInput').closest('.uploadSlot').classList.remove('hasFile');$('removeGpx').hidden=true;$('gpxName').textContent='Choose a .gpx, .tcx or .fit file';updateMetricOptions();say(err.message,true);ready();smartSyncAllClips()}};
+updateMetricOptions();$('gpxInput').onchange=async e=>{if(recording)return;const f=e.target.files[0];if(!f)return;const token=++gpxUploadToken;gpxLoading=true;$('exportBtn').disabled=true;try{const ext=(f.name.split('.').pop()||'').toLowerCase(),parsed=ext==='fit'?parseFIT(await f.arrayBuffer()):ext==='tcx'?parseTCX(await f.text()):{points:parseGPX(await f.text()),laps:[]};if(token!==gpxUploadToken)return;gpxLoading=false;points=parsed.points;activityUtcOffsetMinutes=Number.isFinite(parsed.utcOffsetMinutes)?parsed.utcOffsetMinutes:null;fileLaps=parsed.laps.map(l=>({sec:(l.end-points[0].time)/1000,time:l.time,dist:l.dist,hr:l.hr})).filter(l=>Number.isFinite(l.sec)&&l.sec>0);$('lapMarkers').checked=fileLaps.length>1;$('lapBeep').checked=fileLaps.length>1;prepareRoute();$('gpxName').textContent=f.name;$('gpxInput').closest('.uploadSlot').classList.add('hasFile');$('removeGpx').hidden=false;const available=updateMetricOptions();for(const id of ['hrToggle','cadToggle','eleToggle','inclineToggle','powerToggle','speedToggle','lapDistToggle','lapTimeToggle'])$(id).checked=false;$('paceToggle').checked=!!available.pace;$('distanceToggle').checked=!!available.distance;$('timeToggle').checked=!!available.time;$('chartMetric').value=available.map?'map':['pace','ele','hr','cad','power','speed'].find(key=>available[key])||'none';syncDropdowns();syncMaxHRVisibility();ready();smartSyncAllClips();if(!points.some(p=>Number.isFinite(p.hr)))say('Activity loaded without heart rate. Available metrics are shown below.');if(fileLaps.length>1){syncLapUi();say('Found '+fileLaps.length+' laps in this file. Lap markers are on, and Lap distance and Lap time are now available in the overlay options.')}}catch(err){if(token!==gpxUploadToken)return;gpxLoading=false;points=[];activityUtcOffsetMinutes=null;fileLaps=[];routePath=[];routeBounds=null;$('gpxInput').closest('.uploadSlot').classList.remove('hasFile');$('removeGpx').hidden=true;$('gpxName').textContent='Choose a .gpx, .tcx or .fit file';updateMetricOptions();say(err.message,true);ready();smartSyncAllClips()}};
 $('removeVideo').onclick=()=>{if(recording)return;sourceClips.forEach(c=>URL.revokeObjectURL(c.url));sourceClips=[];selectedClip=0;montagePlaying=false;pendingSourceFrame=null;renderClipList();video.pause();video.onloadedmetadata=null;video.onloadeddata=null;video.onseeked=null;video.oncanplay=null;video.onerror=null;video.removeAttribute('src');video.load();videoURL=null;$('videoInput').value='';$('videoName').textContent='Choose MP4, MOV or WebM';renderUploadClipOrder();$('videoInput').closest('.uploadSlot').classList.remove('hasFile');$('removeVideo').hidden=true;trimStart=trimEnd=0;slices=[];activeSlice=0;transitionFrame=null;transitionDemoStop=null;$('play').disabled=true;setPlayState(false);$('trimPlayhead').setAttribute('aria-valuemax','0');$('trimPlayhead').style.left='0%';$('markerTime').textContent='0:00.0';updateTrim();say('Video removed. Add another clip to continue.')};
-$('removeGpx').onclick=()=>{if(recording)return;++gpxUploadToken;gpxLoading=false;points=[];fileLaps=[];routePath=[];routeBounds=null;$('gpxInput').value='';$('gpxName').textContent='Choose a .gpx, .tcx or .fit file';$('gpxInput').closest('.uploadSlot').classList.remove('hasFile');$('removeGpx').hidden=true;updateMetricOptions();ready();smartSyncAllClips();say('GPX removed. Add another activity to continue.')};
+$('removeGpx').onclick=()=>{if(recording)return;++gpxUploadToken;gpxLoading=false;points=[];activityUtcOffsetMinutes=null;fileLaps=[];routePath=[];routeBounds=null;$('gpxInput').value='';$('gpxName').textContent='Choose a .gpx, .tcx or .fit file';$('gpxInput').closest('.uploadSlot').classList.remove('hasFile');$('removeGpx').hidden=true;updateMetricOptions();ready();smartSyncAllClips();say('GPX removed. Add another activity to continue.')};
 function setPlayState(playing){$('play').dataset.playing=String(playing);$('play').setAttribute('aria-label',playing?'Pause video':'Play video')}const mobileMenuToggle=$('mobileMenuToggle'),mobileMenu=$('mobileMenu');function closeMobileMenu(){mobileMenu.hidden=true;mobileMenuToggle.setAttribute('aria-expanded','false');mobileMenuToggle.setAttribute('aria-label','Open menu')}mobileMenuToggle.onclick=()=>{const open=mobileMenu.hidden;mobileMenu.hidden=!open;mobileMenuToggle.setAttribute('aria-expanded',String(open));mobileMenuToggle.setAttribute('aria-label',open?'Close menu':'Open menu')};mobileMenu.addEventListener('click',e=>{if(e.target.closest('a'))closeMobileMenu()});document.addEventListener('pointerdown',e=>{if(!mobileMenu.hidden&&!e.target.closest('#mobileMenu')&&!e.target.closest('#mobileMenuToggle'))closeMobileMenu()});document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!mobileMenu.hidden){closeMobileMenu();mobileMenuToggle.focus()}});$('play').onclick=()=>{transitionDemoStop=null;if(!video.paused){montagePlaying=false;video.pause();return}const segments=montageSegments();if(!segments.length){montagePlaying=false;say('Add a playable video clip first.',true);return}montagePlaying=true;const atMontageEnd=selectedClip===segments.at(-1).sourceIndex&&activeSlice===segments.at(-1).sliceIndex&&(video.ended||video.currentTime>=trimEnd-.04);if(atMontageEnd){const first=segments[0];if(selectedClip!==first.sourceIndex){selectSourceClip(first.sourceIndex,first.sliceIndex,first.start,true);return}if(activeSlice!==first.sliceIndex)selectSlice(first.sliceIndex,false);video.currentTime=first.start}else if(video.currentTime<trimStart||video.currentTime>=trimEnd-.04){video.currentTime=trimStart}video.play().catch(error=>{montagePlaying=false;say('Could not play this video: '+(error?.message||'check the video format.'),true)})};video.onplay=()=>{setCenterGuides(false);selectVideo(false);overlaySelected=false;updateOverlayGuide();setPlayState(true)};video.onpause=()=>{setPlayState(false)};video.onended=()=>{if(!recording&&montagePlaying&&selectedClip<sourceClips.length-1)selectSourceClip(selectedClip+1,0,null,true,snapshotFrame());else montagePlaying=false};video.ontimeupdate=()=>{if(!recording&&!video.paused&&trimEnd>trimStart&&video.currentTime>=trimEnd-.03){if(activeSlice<slices.length-1&&(montagePlaying||transitionDemoStop!==null)){const oldFrame=snapshotFrame(),next=slices[activeSlice+1].start;activeSlice++;trimStart=slices[activeSlice].start;trimEnd=slices[activeSlice].end;updateTrim();video.addEventListener('seeked',()=>startTransition(oldFrame),{once:true});video.currentTime=next}else if(montagePlaying&&selectedClip<sourceClips.length-1){selectSourceClip(selectedClip+1,0,null,true,snapshotFrame())}else{montagePlaying=false;video.pause()}}if(transitionDemoStop!==null&&activeSlice>0&&video.currentTime>=transitionDemoStop){transitionDemoStop=null;montagePlaying=false;video.pause()}};const syncHelpButton=$('offsetHelpToggle'),syncHelp=$('offsetHelp');syncHelpButton.onclick=()=>{syncHelp.hidden=!syncHelp.hidden;syncHelpButton.setAttribute('aria-expanded',String(!syncHelp.hidden))};document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!syncHelp.hidden){syncHelp.hidden=true;syncHelpButton.setAttribute('aria-expanded','false');syncHelpButton.focus()}});$('offset').oninput=()=>{if(sourceClips[selectedClip])sourceClips[selectedClip].smartSyncManual=true;syncOffsetTime()};$('offsetTime').onchange=commitOffsetTime;$('offsetTime').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();commitOffsetTime();e.target.blur()}else if(e.key==='Escape'){e.preventDefault();syncOffsetTime();e.target.blur()}};$('maxHR').oninput=e=>$('maxHRValue').textContent=e.target.value+' bpm';
 function montageSegments(){return sourceClips.flatMap((clip,sourceIndex)=>clip.slices.map((slice,sliceIndex)=>({sourceIndex,sliceIndex,start:slice.start,end:slice.end,duration:Math.max(0,slice.end-slice.start)})).filter(segment=>segment.duration>=.1))}
 function montageTotal(){return montageSegments().reduce((total,segment)=>total+segment.duration,0)}
