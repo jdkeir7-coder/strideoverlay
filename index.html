@@ -1716,13 +1716,19 @@ window.StrideFrameExport={run};
 <script>
       const $=id=>document.getElementById(id),video=$('source'),canvas=$('canvas'),ctx=canvas.getContext('2d',{alpha:false});let W=1080,H=1920;
 let activityUtcOffsetMinutes=null;let sourceClips=[],selectedClip=0,exportClipIndex=null,montagePlaying=false,pendingSourceFrame=null;let dropdowns=[];let points=[],routePath=[],routeBounds=null,videoURL=null,recording=false,raf=0,abort=false,exportedFile=null,trimStart=0,trimEnd=0,slices=[],activeSlice=0,transitionFrame=null,transitionStarted=0,transitionStyle='smooth',transitionDemoStop=null,gpxUploadToken=0,gpxLoading=false,videoPanX=0,videoPanY=0,overlayPanX=0,overlayPanY=.82,layoutMode="video",overlayBounds=null,overlaySelected=false,overlayWidthFactor=1,overlayHeightFactor=1,overlayRenderScale=1,videoMoveRange={x:0,y:0};
+
+/* Smart Sync v3: metadata inspection is local-only. Keep full seconds and milliseconds from video/GPS timestamps. */
+function smartSyncUInt64(view,position){
+  if(view.byteLength<position+8)return NaN;
+  return view.getUint32(position,false)*4294967296+view.getUint32(position+4,false);
+}
 async function smartSyncReadBox(file,at,end){
   if(at<0||at+8>end)return null;
   const bytes=new Uint8Array(await file.slice(at,Math.min(at+16,end)).arrayBuffer());
   if(bytes.length<8)return null;
   const v=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
   let size=v.getUint32(0,false),head=8;
-  if(size===1){if(bytes.length<16)return null;size=Number(v.getBigUint64(8,false));head=16;}
+  if(size===1){size=smartSyncUInt64(v,8);head=16;}
   else if(size===0)size=end-at;
   if(!Number.isSafeInteger(size)||size<head||at+size>end)return null;
   return {name:String.fromCharCode(...bytes.slice(4,8)),start:at,end:at+size,dataStart:at+head,size};
@@ -1742,189 +1748,208 @@ function smartSyncParseZonedDate(value){
   const timestamp=Date.parse(s);
   return Number.isFinite(timestamp)&&timestamp>=946684800000&&timestamp<=Date.now()+86400000?timestamp:null;
 }
-async function smartSyncAppleDate(file,moov,moovChildren){
-  const udta=moovChildren.find(b=>b.name==='udta');
-  const parents=[moov];
-  if(udta)parents.push(udta);
+function smartSyncLocalClock(value){
+  const text=String(value||'');
+  const m=text.match(/(20\d{2})[-_](\d{2})[-_](\d{2})[ T_](\d{2}):?(\d{2}):?(\d{2})(?:\.(\d+))?/);
+  if(!m)return null;
+  const [,y,mo,d,h,mi,se,fract]=m;
+  const date={year:+y,month:+mo,day:+d,hour:+h,minute:+mi,second:+se,millisecond:fract?Math.round(Number('0.'+fract)*1000):0};
+  const test=new Date(Date.UTC(date.year,date.month-1,date.day,date.hour,date.minute,date.second,date.millisecond));
+  if(date.month<1||date.month>12||date.day<1||date.day>31||date.hour>23||date.minute>59||date.second>59||
+      test.getUTCFullYear()!==date.year||test.getUTCMonth()+1!==date.month||test.getUTCDate()!==date.day)return null;
+  return date;
+}
+function smartSyncDateCandidates(raw,source,priority){
+  const zoned=smartSyncParseZonedDate(raw);
+  if(zoned!==null)return [{time:zoned,source,priority}];
+  const clock=smartSyncLocalClock(raw);
+  return clock?[{clock,source,priority:priority-5}]:[];
+}
+async function smartSyncReadAppleDates(file,moov,moovChildren){
+  const results=[],udta=moovChildren.find(b=>b.name==='udta');
+  const parents=[{children:moovChildren}];
+  if(udta)parents.push({children:await smartSyncListBoxes(file,udta.dataStart,udta.end,128)});
   for(const parent of parents){
-    const kids=parent===moov?moovChildren:await smartSyncListBoxes(file,parent.dataStart,parent.end,128);
-    for(const meta of kids.filter(b=>b.name==='meta')){
-      const children=await smartSyncListBoxes(file,meta.dataStart+4,meta.end,128);
-      const keys=children.find(b=>b.name==='keys'),ilst=children.find(b=>b.name==='ilst');
-      if(!keys||!ilst)continue;
-      const payload=new Uint8Array(await file.slice(keys.dataStart,Math.min(keys.end,keys.dataStart+131072)).arrayBuffer());
-      if(payload.length<8)continue;
-      const view=new DataView(payload.buffer,payload.byteOffset,payload.byteLength);
-      let p=8,creationKey=0;
-      const count=Math.min(view.getUint32(4,false),512);
-      for(let k=1;k<=count&&p+8<=payload.length;k++){
-        const sz=view.getUint32(p,false);
-        if(sz<8||p+sz>payload.length)break;
-        let key='';
-        for(let j=p+8;j<p+sz;j++)key+=String.fromCharCode(payload[j]);
-        if(key.toLowerCase()==='com.apple.quicktime.creationdate')creationKey=k;
-        p+=sz;
-      }
-      if(!creationKey)continue;
-      const items=await smartSyncListBoxes(file,ilst.dataStart,ilst.end,512);
-      for(const item of items){
-        const id=((item.name.charCodeAt(0)<<24)|(item.name.charCodeAt(1)<<16)|(item.name.charCodeAt(2)<<8)|item.name.charCodeAt(3))>>>0;
-        if(id!==creationKey)continue;
-        const fields=await smartSyncListBoxes(file,item.dataStart,item.end,32);
-        const data=fields.find(b=>b.name==='data');
-        if(!data||data.end-data.dataStart<9)continue;
-        const raw=new Uint8Array(await file.slice(data.dataStart+8,Math.min(data.end,data.dataStart+8+256)).arrayBuffer());
-        let dateString='';for(const byte of raw)dateString+=String.fromCharCode(byte);
-        const date=smartSyncParseZonedDate(dateString);if(date!==null)return date;
+    for(const meta of parent.children.filter(b=>b.name==='meta')){
+      // Both ISO FullBox meta (+4 bytes) and classic QuickTime meta layouts are possible.
+      for(const shift of [4,0]){
+        const children=await smartSyncListBoxes(file,meta.dataStart+shift,meta.end,128);
+        const keys=children.find(b=>b.name==='keys'),ilst=children.find(b=>b.name==='ilst');
+        if(!keys||!ilst)continue;
+        const payload=new Uint8Array(await file.slice(keys.dataStart,Math.min(keys.end,keys.dataStart+131072)).arrayBuffer());
+        if(payload.length<8)continue;
+        const view=new DataView(payload.buffer,payload.byteOffset,payload.byteLength);
+        let pos=8,keyIndex=0;
+        const count=Math.min(view.getUint32(4,false),512);
+        for(let k=1;k<=count&&pos+8<=payload.length;k++){
+          const size=view.getUint32(pos,false);if(size<8||pos+size>payload.length)break;
+          let key='';for(let j=pos+8;j<pos+size;j++)key+=String.fromCharCode(payload[j]);
+          if(/com\.apple\.quicktime\.(creationdate|date)$/i.test(key))keyIndex=k;
+          pos+=size;
+        }
+        if(!keyIndex)continue;
+        const items=await smartSyncListBoxes(file,ilst.dataStart,ilst.end,512);
+        for(const item of items){
+          const bytes=item.name.split('').map(ch=>ch.charCodeAt(0));
+          const idx=((bytes[0]<<24)|(bytes[1]<<16)|(bytes[2]<<8)|bytes[3])>>>0;
+          if(idx!==keyIndex)continue;
+          const fields=await smartSyncListBoxes(file,item.dataStart,item.end,32);
+          const data=fields.find(b=>b.name==='data');
+          if(!data)continue;
+          const raw=new Uint8Array(await file.slice(data.dataStart+8,Math.min(data.end,data.dataStart+8+256)).arrayBuffer());
+          results.push(...smartSyncDateCandidates(new TextDecoder().decode(raw),'iPhone recording date',120));
+        }
       }
     }
   }
-  return null;
+  return results;
 }
-
-function smartSyncMovieDate(file,box){
- if(!box)return Promise.resolve(null);
- return file.slice(box.dataStart,Math.min(box.end,box.dataStart+24)).arrayBuffer().then(buf=>{
+async function smartSyncMovieDate(file,box){
+  if(!box)return null;
+  const buf=await file.slice(box.dataStart,Math.min(box.end,box.dataStart+24)).arrayBuffer();
   const v=new DataView(buf);if(v.byteLength<8)return null;
-  const seconds=v.getUint8(0)===1?(v.byteLength>=12?Number(v.getBigUint64(4,false)):NaN):v.getUint32(4,false);
+  const seconds=v.getUint8(0)===1?smartSyncUInt64(v,4):v.getUint32(4,false);
   const epoch=(seconds-2082844800)*1000;
   return Number.isFinite(epoch)&&epoch>=946684800000&&epoch<=Date.now()+86400000?epoch:null;
- });
 }
-async function smartSyncReadLegacyDate(file,moov,children){
- // Classic QuickTime files may store a creation date in udta/©day or metadata/ilst/©day.
- const udta=children.find(b=>b.name==='udta');if(!udta)return [];
- const found=[],items=await smartSyncListBoxes(file,udta.dataStart,udta.end,192);
- const groups=[items];
- for(const meta of items.filter(b=>b.name==='meta')){
-  const elements=await smartSyncListBoxes(file,meta.dataStart+4,meta.end,192);
-  groups.push(elements);
-  for(const ilst of elements.filter(b=>b.name==='ilst'))groups.push(await smartSyncListBoxes(file,ilst.dataStart,ilst.end,256));
- }
- for(const group of groups)for(const b of group){
-  if(!['©day','day '].includes(b.name))continue;
-  let start=b.dataStart;
-  const inside=await smartSyncListBoxes(file,b.dataStart,b.end,10);
-  const data=inside.find(box=>box.name==='data');
-  if(data)start=data.dataStart+8;
-  const bytes=new Uint8Array(await file.slice(start,Math.min(b.end,start+512)).arrayBuffer());
-  const text=new TextDecoder().decode(bytes);
-  const parsed=smartSyncParseZonedDate(text);
-  if(parsed!==null)found.push({time:parsed,source:'QuickTime date',priority:105});
- }
- return found;
+async function smartSyncReadLegacyDates(file,moov,children){
+  const parents=[children],udta=children.find(b=>b.name==='udta');
+  if(udta)parents.push(await smartSyncListBoxes(file,udta.dataStart,udta.end,192));
+  const groups=[...parents];
+  for(const parent of parents)for(const meta of parent.filter(b=>b.name==='meta')){
+    for(const shift of [4,0]){
+      const elements=await smartSyncListBoxes(file,meta.dataStart+shift,meta.end,192);
+      groups.push(elements);
+      for(const ilst of elements.filter(b=>b.name==='ilst'))groups.push(await smartSyncListBoxes(file,ilst.dataStart,ilst.end,256));
+    }
+  }
+  const found=[];
+  for(const group of groups)for(const atom of group){
+    if(!['©day','day '].includes(atom.name))continue;
+    let start=atom.dataStart;
+    const inside=await smartSyncListBoxes(file,atom.dataStart,atom.end,10);
+    const data=inside.find(box=>box.name==='data');
+    if(data)start=data.dataStart+8;
+    const bytes=new Uint8Array(await file.slice(start,Math.min(atom.end,start+512)).arrayBuffer());
+    found.push(...smartSyncDateCandidates(new TextDecoder().decode(bytes),'QuickTime date',105));
+  }
+  return found;
 }
 function smartSyncFileNameClock(name){
- const text=String(name||'');
- // Filenames from cameras such as DJI_20261002184432_0094_D.MOV or VID_20261002_184432.MP4.
- const match=text.match(/(?:^|[_ -])(?:DJI[_ -]?|VID[_ -]?|PXL[_ -]?|MOV[_ -]?)?(20\d{6})[_ -]?(\d{6})(?=[_. -]|$)/i);
- if(!match)return null;
- const d=match[1],t=match[2],year=Number(d.slice(0,4)),month=Number(d.slice(4,6)),day=Number(d.slice(6,8)),hour=Number(t.slice(0,2)),minute=Number(t.slice(2,4)),second=Number(t.slice(4,6));
- if(month<1||month>12||day<1||day>31||hour>23||minute>59||second>59)return null;
- const verify=new Date(Date.UTC(year,month-1,day,hour,minute,second));
- if(verify.getUTCFullYear()!==year||verify.getUTCMonth()+1!==month||verify.getUTCDate()!==day)return null;
- return {year,month,day,hour,minute,second};
+  const text=String(name||'');
+  // Keep the full HH:MM:SS from filenames such as DJI_20261002184432_0094_D.MOV.
+  const match=text.match(/(?:^|[_ -])(?:DJI[_ -]?|VID[_ -]?|PXL[_ -]?|MOV[_ -]?)?(20\d{6})[_ -]?(\d{6})(?=[_. -]|$)/i);
+  if(!match)return null;
+  const d=match[1],t=match[2];
+  return smartSyncLocalClock(d.slice(0,4)+'-'+d.slice(4,6)+'-'+d.slice(6,8)+' '+t.slice(0,2)+':'+t.slice(2,4)+':'+t.slice(4,6));
 }
 async function smartSyncReadCaptureCandidates(file){
- const results=[],add=(time,source,priority)=>{
-  if(Number.isFinite(time)&&time>=946684800000&&time<=Date.now()+86400000&&!results.some(x=>x.time===time&&x.source===source))results.push({time,source,priority});
- };
- const name=String(file?.name||'');
- const clock=smartSyncFileNameClock(name);
- if(clock)results.push({clock,source:'camera filename',priority:85});
- if(!file||!/\.(mp4|mov|m4v)$/i.test(name))return results;
- try{
-  const top=await smartSyncListBoxes(file,0,file.size,512),moov=top.find(box=>box.name==='moov');
-  if(!moov)return results;
-  const inner=await smartSyncListBoxes(file,moov.dataStart,moov.end,512);
-  try{add(await smartSyncAppleDate(file,moov,inner),'iPhone recording date',120)}catch{}
-  try{for(const date of await smartSyncReadLegacyDate(file,moov,inner))add(date.time,date.source,date.priority)}catch{}
-  try{add(await smartSyncMovieDate(file,inner.find(b=>b.name==='mvhd')),'video header',75)}catch{}
-  // Some MOV/MP4 producers omit mvhd creation time but preserve per-track dates.
-  for(const trak of inner.filter(b=>b.name==='trak').slice(0,6)){
-   try{
-    const parts=await smartSyncListBoxes(file,trak.dataStart,trak.end,96);
-    add(await smartSyncMovieDate(file,parts.find(b=>b.name==='tkhd')),'track header',65);
-    const mdia=parts.find(b=>b.name==='mdia');
-    if(mdia){const children=await smartSyncListBoxes(file,mdia.dataStart,mdia.end,96);add(await smartSyncMovieDate(file,children.find(b=>b.name==='mdhd')),'media header',60);}
-   }catch{}
-  }
- }catch{}
- return results;
+  const results=[],add=(time,source,priority)=>{
+    if(Number.isFinite(time)&&time>=946684800000&&time<=Date.now()+86400000&&!results.some(x=>x.time===time&&x.source===source))results.push({time,source,priority});
+  };
+  if(!file)return results;
+  const name=String(file.name||'');
+  const clock=smartSyncFileNameClock(name);
+  if(clock)results.push({clock,source:'camera filename',priority:85});
+  // iOS Photos/files picker may retain the original capture time here even if MOV tags are lost.
+  // Use only as a LOW confidence fallback, and only if it falls within the actual activity.
+  if(Number.isFinite(file.lastModified))add(file.lastModified,'file date (check sync)',15);
+  if(!/\.(mp4|mov|m4v)$/i.test(name))return results;
+  try{
+    const top=await smartSyncListBoxes(file,0,file.size,512),moov=top.find(b=>b.name==='moov');
+    if(!moov)return results;
+    const inner=await smartSyncListBoxes(file,moov.dataStart,moov.end,512);
+    try{for(const d of await smartSyncReadAppleDates(file,moov,inner))results.push(d)}catch{}
+    try{for(const d of await smartSyncReadLegacyDates(file,moov,inner))results.push(d)}catch{}
+    try{add(await smartSyncMovieDate(file,inner.find(b=>b.name==='mvhd')),'video header',75)}catch{}
+    for(const trak of inner.filter(b=>b.name==='trak').slice(0,6)){
+      try{
+        const parts=await smartSyncListBoxes(file,trak.dataStart,trak.end,96);
+        add(await smartSyncMovieDate(file,parts.find(b=>b.name==='tkhd')),'track header',65);
+        const mdia=parts.find(b=>b.name==='mdia');
+        if(mdia){
+          const subs=await smartSyncListBoxes(file,mdia.dataStart,mdia.end,96);
+          add(await smartSyncMovieDate(file,subs.find(b=>b.name==='mdhd')),'media header',60);
+        }
+      }catch{}
+    }
+  }catch{}
+  return results;
 }
 function smartSyncCompareTimes(candidates){
- const first=points[0]?.time,last=points.at(-1)?.time;
- if(!Number.isFinite(first)||!Number.isFinite(last)||last<first)return {matched:false,reason:'no-activity'};
- if(!candidates?.length)return {matched:false,reason:'no-timestamp'};
- const possible=[];
- const add=(time,source,priority)=>{
-  if(!Number.isFinite(time))return;
-  if(time>=first&&time<=last)possible.push({time,source,priority});
- };
- for(const cand of candidates){
-  if(cand.clock){
-   const {year,month,day,hour,minute,second}=cand.clock;
-   const utc=Date.UTC(year,month-1,day,hour,minute,second);
-   // FIT can carry the workout's local UTC offset, making camera wall-clock filenames precise.
-   if(Number.isFinite(activityUtcOffsetMinutes))add(utc-activityUtcOffsetMinutes*60000,'camera filename + FIT time zone',110);
-   const local=new Date(year,month-1,day,hour,minute,second).getTime();
-   add(local,'camera filename (device time zone)',90);
-   add(utc,'camera filename (UTC)',55);
-  } else {
-   add(cand.time,cand.source,cand.priority);
-   // A few camera makers store local clock time in the UTC movie header.
-   // Only apply the watch's explicit timezone for this secondary, lower-confidence option.
-   if(Number.isFinite(activityUtcOffsetMinutes)&&activityUtcOffsetMinutes!==0&&/header/.test(cand.source)){
-    add(cand.time-activityUtcOffsetMinutes*60000,'video header + FIT time zone',48);
-   }
+  const first=points[0]?.time,last=points.at(-1)?.time;
+  if(!Number.isFinite(first)||!Number.isFinite(last)||last<first)return {matched:false,reason:'no-activity'};
+  if(!candidates?.length)return {matched:false,reason:'no-timestamp'};
+  const possible=[];
+  const add=(time,source,priority)=>{
+    if(Number.isFinite(time)&&time>=first&&time<=last)possible.push({time,source,priority});
+  };
+  for(const cand of candidates){
+    if(cand.clock){
+      const {year,month,day,hour,minute,second,millisecond=0}=cand.clock;
+      const utc=Date.UTC(year,month-1,day,hour,minute,second,millisecond);
+      const high=/(iPhone recording date|QuickTime date)/.test(cand.source);
+      const tzBoost=high?20:25;
+      if(Number.isFinite(activityUtcOffsetMinutes))add(utc-activityUtcOffsetMinutes*60000,cand.source+' + FIT time zone',cand.priority+tzBoost);
+      const local=new Date(year,month-1,day,hour,minute,second,millisecond).getTime();
+      add(local,cand.source+' (device time zone)',cand.priority);
+      add(utc,cand.source+' (UTC)',cand.priority-35);
+    }else{
+      add(cand.time,cand.source,cand.priority);
+      if(Number.isFinite(activityUtcOffsetMinutes)&&activityUtcOffsetMinutes!==0&&/header/.test(cand.source))
+        add(cand.time-activityUtcOffsetMinutes*60000,'video header + FIT time zone',48);
+    }
   }
- }
- if(!possible.length)return {matched:false,reason:'outside-activity'};
- possible.sort((a,b)=>b.priority-a.priority);
- const best=possible[0];
- return {matched:true,seconds:Math.round((best.time-first)/100)/10,source:best.source,time:best.time};
+  if(!possible.length)return {matched:false,reason:'outside-activity'};
+  possible.sort((a,b)=>b.priority-a.priority);
+  const best=possible[0];
+  // UTC timestamps are kept to the millisecond; GPS FIT records normally have whole seconds.
+  // Set the existing 0.1-second slider from the actual difference, never HH:MM alone.
+  return {matched:true,seconds:Math.round((best.time-first)/100)/10,source:best.source,time:best.time,confidence:best.priority>=60?'strong':'tentative'};
 }
 function smartSyncUpdateHint(){
- const control=$('offset');if(!control)return;
- let hint=$('smartSyncHint');
- if(!hint){
-  hint=document.createElement('div');hint.id='smartSyncHint';hint.setAttribute('role','status');
-  hint.setAttribute('aria-live','polite');hint.className='smartSyncHint';
-  control.insertAdjacentElement('afterend',hint);
- }
- const clip=sourceClips[selectedClip];hint.hidden=!clip||!points.length;
- if(hint.hidden)return;
- if(clip.smartSyncManual)hint.textContent='Manual timing · your adjustment stays saved for this clip';
- else if(clip.smartSyncPending)hint.textContent='Smart Sync · checking recording time…';
- else if(clip.smartSyncMatched)hint.textContent='Smart Sync · matched using '+(clip.smartSyncSource||'recording time')+' · adjust if needed';
- else if(clip.smartSyncReason==='outside-activity')hint.textContent='Recording time does not match this activity · starts at 0:00';
- else if(clip.smartSyncReason==='no-timestamp')hint.textContent='No recording timestamp found · starts at 0:00';
- else hint.textContent='Starts at 0:00 · adjust the slider if needed';
+  const control=$('offset');if(!control)return;
+  let hint=$('smartSyncHint');
+  if(!hint){
+    hint=document.createElement('div');hint.id='smartSyncHint';hint.setAttribute('role','status');
+    hint.setAttribute('aria-live','polite');hint.className='smartSyncHint';
+    control.insertAdjacentElement('afterend',hint);
+  }
+  const clip=sourceClips[selectedClip];hint.hidden=!clip||!points.length;
+  if(hint.hidden)return;
+  if(clip.smartSyncManual)hint.textContent='Manual timing · your adjustment is saved for this clip';
+  else if(clip.smartSyncPending)hint.textContent='Smart Sync · checking recording time…';
+  else if(clip.smartSyncMatched){
+    const caution=clip.smartSyncConfidence==='tentative'?' · check timing':'';
+    hint.textContent='Smart Sync · '+formatOffset(clip.offset)+' from '+(clip.smartSyncSource||'recording time')+caution;
+  }else if(clip.smartSyncReason==='outside-activity')hint.textContent='Recording time does not match this activity · starts at 0:00';
+  else if(clip.smartSyncReason==='no-timestamp')hint.textContent='No recording timestamp found · starts at 0:00';
+  else hint.textContent='Starts at 0:00 · adjust the slider if needed';
 }
 function smartSyncApply(clip){
- if(!clip||!sourceClips.includes(clip)||clip.smartSyncManual||recording)return;
- const found=smartSyncCompareTimes(clip.smartSyncCandidates);
- const seconds=found.matched?found.seconds:0;
- clip.offset=seconds;clip.smartSyncMatched=!!found.matched;
- clip.smartSyncSource=found.source||null;clip.smartSyncReason=found.reason||null;
- if(sourceClips[selectedClip]===clip){$('offset').value=String(seconds);syncOffsetTime();}
- else smartSyncUpdateHint();
+  if(!clip||!sourceClips.includes(clip)||clip.smartSyncManual||recording)return;
+  const found=smartSyncCompareTimes(clip.smartSyncCandidates);
+  const seconds=found.matched?found.seconds:0;
+  clip.offset=seconds;clip.smartSyncMatched=!!found.matched;
+  clip.smartSyncSource=found.source||null;clip.smartSyncReason=found.reason||null;clip.smartSyncConfidence=found.confidence||null;
+  if(sourceClips[selectedClip]===clip){$('offset').value=String(seconds);syncOffsetTime();}
+  else smartSyncUpdateHint();
 }
 function smartSyncReadClip(clip){
- if(!clip||clip.smartSyncReadStarted)return;
- clip.smartSyncReadStarted=true;clip.smartSyncPending=true;
- clip.smartSyncCandidates=[];clip.smartSyncReason='checking';smartSyncUpdateHint();
- smartSyncReadCaptureCandidates(clip.file).then(candidates=>{
-  if(!sourceClips.includes(clip))return;
-  clip.smartSyncPending=false;clip.smartSyncCandidates=candidates;smartSyncApply(clip);
- }).catch(()=>{
-  if(!sourceClips.includes(clip))return;
-  clip.smartSyncPending=false;clip.smartSyncCandidates=[];smartSyncApply(clip);
- });
+  if(!clip||clip.smartSyncReadStarted)return;
+  clip.smartSyncReadStarted=true;clip.smartSyncPending=true;
+  clip.smartSyncCandidates=[];clip.smartSyncReason='checking';smartSyncUpdateHint();
+  smartSyncReadCaptureCandidates(clip.file).then(candidates=>{
+    if(!sourceClips.includes(clip))return;
+    clip.smartSyncPending=false;clip.smartSyncCandidates=candidates;smartSyncApply(clip);
+  }).catch(()=>{
+    if(!sourceClips.includes(clip))return;
+    clip.smartSyncPending=false;clip.smartSyncCandidates=[];smartSyncApply(clip);
+  });
 }
 function smartSyncAllClips(){
- for(const clip of sourceClips){if(!clip.smartSyncReadStarted)smartSyncReadClip(clip);else smartSyncApply(clip);}
- smartSyncUpdateHint();
+  for(const clip of sourceClips){if(!clip.smartSyncReadStarted)smartSyncReadClip(clip);else smartSyncApply(clip);}
+  smartSyncUpdateHint();
 }
 const color=()=> '#92ff5f';
 const fmt=s=>{s=Math.max(0,Math.floor(Number(s)||0));return Math.floor(s/60)+':'+String(s%60).padStart(2,'0')};
